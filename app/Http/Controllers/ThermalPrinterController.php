@@ -151,6 +151,20 @@ class ThermalPrinterController extends Controller
             Auth::user()
         );
 
+        \App\Services\FeatureLog::printer(
+            'DIRECT_PRINT_ORDER',
+            "Cetak tiket pesanan #{$order->order_number} ({$ticketType}) ke printer '{$targetPrinter}' | Hasil: " . ($result['success'] ? 'SUKSES' : 'GAGAL') . " | Durasi: {$durationMs} ms | Latency: {$printLog->latency_ms} ms",
+            [
+                'order_id' => $order->id,
+                'order_number' => $order->order_number,
+                'printer' => $targetPrinter,
+                'type' => $ticketType,
+                'latency_ms' => $printLog->latency_ms,
+                'duration_ms' => $durationMs,
+                'success' => $result['success'],
+            ]
+        );
+
         return response()->json([
             'success' => $result['success'],
             'message' => $result['message'],
@@ -189,6 +203,19 @@ class ThermalPrinterController extends Controller
             );
         }
 
+        \App\Services\FeatureLog::printer(
+            'DIRECT_PRINT_ITEM',
+            "Cetak tiket menu '{$item->product_name}' (Order #{$item->order?->order_number}) ke printer '{$targetPrinter}' | Hasil: " . ($result['success'] ? 'SUKSES' : 'GAGAL') . " | Durasi: {$durationMs} ms",
+            [
+                'item_id' => $item->id,
+                'item_name' => $item->product_name,
+                'order_number' => $item->order?->order_number,
+                'printer' => $targetPrinter,
+                'duration_ms' => $durationMs,
+                'success' => $result['success'],
+            ]
+        );
+
         return response()->json([
             'success' => $result['success'],
             'message' => $result['message'],
@@ -224,6 +251,18 @@ class ThermalPrinterController extends Controller
             null,
             $durationMs !== null ? (int)$durationMs : null,
             Auth::user()
+        );
+
+        \App\Services\FeatureLog::printer(
+            'CLIENT_PRINT_LATENCY',
+            "Latensi cetak browser client dicatat untuk Order #{$order->order_number} (Metode: {$method}, Printer: {$printer}, Latency: {$printLog->latency_ms} ms)",
+            [
+                'order_id' => $order->id,
+                'order_number' => $order->order_number,
+                'latency_ms' => $printLog->latency_ms,
+                'method' => $method,
+                'printer' => $printer,
+            ]
         );
 
         return response()->json([
@@ -283,6 +322,18 @@ class ThermalPrinterController extends Controller
             'open_cash_drawer',
         ]));
 
+        \App\Services\FeatureLog::printer(
+            'SETTINGS_UPDATED',
+            "Pengaturan printer thermal diperbarui: Kertas={$settings->paper_size}, Printer default='{$settings->windows_printer_name}', DirectPrint=" . ($settings->direct_hardware_print ? 'ON' : 'OFF'),
+            [
+                'paper_size' => $settings->paper_size,
+                'windows_printer_name' => $settings->windows_printer_name,
+                'direct_hardware_print' => $settings->direct_hardware_print,
+                'auto_print_cashier' => $settings->auto_print_cashier,
+                'auto_print_kitchen' => $settings->auto_print_kitchen,
+            ]
+        );
+
         return response()->json([
             'success' => true,
             'message' => 'Pengaturan printer thermal berhasil diperbarui!',
@@ -329,6 +380,16 @@ class ThermalPrinterController extends Controller
         if ($settings->direct_hardware_print || $request->boolean('force_direct')) {
             $directResult = $this->escPosService->printDirectToWindowsPrinter($out, $settings->windows_printer_name);
         }
+
+        \App\Services\FeatureLog::printer(
+            'TEST_PRINT',
+            "Test print ESC/POS dijalankan ke printer '{$settings->windows_printer_name}' (Ukuran: {$settings->paper_size}, Direct: " . ($directResult ? 'YA' : 'TIDAK') . ")",
+            [
+                'paper_size' => $settings->paper_size,
+                'printer' => $settings->windows_printer_name,
+                'direct_result' => $directResult,
+            ]
+        );
 
         return response()->json([
             'success' => true,

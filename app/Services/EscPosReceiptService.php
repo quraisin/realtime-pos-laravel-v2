@@ -144,7 +144,7 @@ class EscPosReceiptService
                 'receipt_print_count' => ($order->receipt_print_count ?? 0) + 1,
             ]);
 
-            Log::info(sprintf(
+            $logMsg = sprintf(
                 "[RECEIPT PRINTED] Order #%s | Latency from Order Created: %d ms (%.2f s) | Print Duration: %d ms | Method: %s | Printer: %s | Cashier: %s",
                 $order->order_number,
                 $latencyMs,
@@ -153,16 +153,34 @@ class EscPosReceiptService
                 $method,
                 $printerName ?: 'Putian POS Thermal 2',
                 $user?->name ?? $order->cashier?->name ?? 'Kasir'
-            ));
+            );
+            Log::info($logMsg);
+            \App\Services\FeatureLog::printer('RECEIPT_PRINTED', $logMsg, [
+                'order_id' => $order->id,
+                'order_number' => $order->order_number,
+                'latency_ms' => $latencyMs,
+                'duration_ms' => $durationMs,
+                'method' => $method,
+                'printer' => $printerName,
+            ]);
         } else {
-            Log::warning(sprintf(
+            $failMsg = sprintf(
                 "[RECEIPT PRINT FAILED] Order #%s | Latency until failure: %d ms | Method: %s | Printer: %s | Error: %s",
                 $order->order_number,
                 $latencyMs,
                 $method,
                 $printerName ?: 'Putian POS Thermal 2',
                 $errorMessage
-            ));
+            );
+            Log::warning($failMsg);
+            \App\Services\FeatureLog::printer('RECEIPT_PRINT_FAILED', $failMsg, [
+                'order_id' => $order->id,
+                'order_number' => $order->order_number,
+                'latency_ms' => $latencyMs,
+                'method' => $method,
+                'printer' => $printerName,
+                'error' => $errorMessage,
+            ], 'warning');
         }
 
         return $printLog;

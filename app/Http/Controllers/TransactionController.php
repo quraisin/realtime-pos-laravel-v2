@@ -110,6 +110,11 @@ class TransactionController extends Controller
         $plainText = $this->escPosService->generateReceiptPlainText($order, $settings);
         $receiptBytes = $this->escPosService->generateReceiptBytes($order, $settings);
 
+        \App\Services\FeatureLog::transaction('SHOW_ORDER', "Detail transaksi #{$order->order_number} dibuka", [
+            'order_id' => $order->id,
+            'order_number' => $order->order_number,
+        ], 'debug');
+
         return response()->json([
             'success' => true,
             'order' => $order,
@@ -129,6 +134,12 @@ class TransactionController extends Controller
             $order = Order::with('items')->lockForUpdate()->findOrFail($id);
 
             if ($order->payment_status === 'void' || $order->payment_status === 'refunded') {
+                \App\Services\FeatureLog::transaction('VOID_REJECTED', "Percobaan VOID ditolak: Transaksi #{$order->order_number} sudah berstatus void/refund sebelumnya", [
+                    'order_id' => $order->id,
+                    'order_number' => $order->order_number,
+                    'payment_status' => $order->payment_status,
+                ], 'warning');
+
                 return response()->json([
                     'success' => false,
                     'message' => 'Transaksi ini sudah berstatus void/refund sebelumnya.',
@@ -142,11 +153,20 @@ class TransactionController extends Controller
                 }
             }
 
+            $reason = $request->input('reason', 'Dibatalkan oleh kasir');
             $previousStatus = $order->kitchen_status;
             $order->update([
                 'payment_status' => 'void',
                 'kitchen_status' => 'cancelled',
-                'notes' => ($order->notes ? $order->notes . ' | ' : '') . 'VOID: ' . ($request->input('reason', 'Dibatalkan oleh kasir')),
+                'notes' => ($order->notes ? $order->notes . ' | ' : '') . 'VOID: ' . $reason,
+            ]);
+
+            \App\Services\FeatureLog::transaction('ORDER_VOIDED', "Transaksi #{$order->order_number} di-VOID. Alasan: '{$reason}'. Stok dipulihkan untuk {$order->items->count()} item", [
+                'order_id' => $order->id,
+                'order_number' => $order->order_number,
+                'total_amount' => $order->total_amount,
+                'items_restored' => $order->items->count(),
+                'reason' => $reason,
             ]);
 
             // Notify KDS
@@ -177,6 +197,13 @@ class TransactionController extends Controller
 
         $orders = $query->get();
         $filename = 'laporan-transaksi-' . date('Y-m-d-His') . '.csv';
+
+        \App\Services\FeatureLog::transaction('CSV_EXPORTED', "Laporan transaksi diekspor ({$orders->count()} data transaksi)", [
+            'total_rows' => $orders->count(),
+            'date_from' => $request->input('date_from'),
+            'date_to' => $request->input('date_to'),
+            'filename' => $filename,
+        ]);
 
         $headers = [
             'Content-Type' => 'text/csv; charset=UTF-8',
@@ -240,6 +267,12 @@ class TransactionController extends Controller
             'notes' => $validated['notes'] ?? '',
         ]);
 
+        \App\Services\FeatureLog::transaction('ITEM_NOTE_UPDATED', "Catatan menu '{$item->product_name}' (Order #{$item->order?->order_number}) diperbarui menjadi: '{$item->notes}'", [
+            'item_id' => $item->id,
+            'order_id' => $item->order_id,
+            'notes' => $item->notes,
+        ]);
+
         // Notify KDS in real-time
         if ($item->order) {
             Cache::put('kds_last_update', microtime(true), 3600);
@@ -265,6 +298,11 @@ class TransactionController extends Controller
         $order = Order::with('items')->findOrFail($id);
         $order->update([
             'notes' => $validated['notes'] ?? '',
+        ]);
+
+        \App\Services\FeatureLog::transaction('ORDER_NOTE_UPDATED', "Catatan transaksi #{$order->order_number} diperbarui menjadi: '{$order->notes}'", [
+            'order_id' => $order->id,
+            'notes' => $order->notes,
         ]);
 
         // Notify KDS in real-time

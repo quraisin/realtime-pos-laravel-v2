@@ -65,6 +65,56 @@ return [
             'replace_placeholders' => true,
         ],
 
+        // Feature-specific log channels (Grouped by module)
+        'auth' => [
+            'driver' => 'single',
+            'path' => storage_path('logs/auth.log'),
+            'level' => env('LOG_LEVEL', 'debug'),
+            'replace_placeholders' => true,
+        ],
+
+        'pos' => [
+            'driver' => 'single',
+            'path' => storage_path('logs/pos.log'),
+            'level' => env('LOG_LEVEL', 'debug'),
+            'replace_placeholders' => true,
+        ],
+
+        'transaction' => [
+            'driver' => 'single',
+            'path' => storage_path('logs/transaction.log'),
+            'level' => env('LOG_LEVEL', 'debug'),
+            'replace_placeholders' => true,
+        ],
+
+        'kds' => [
+            'driver' => 'single',
+            'path' => storage_path('logs/kds.log'),
+            'level' => env('LOG_LEVEL', 'debug'),
+            'replace_placeholders' => true,
+        ],
+
+        'cms' => [
+            'driver' => 'single',
+            'path' => storage_path('logs/cms.log'),
+            'level' => env('LOG_LEVEL', 'debug'),
+            'replace_placeholders' => true,
+        ],
+
+        'printer' => [
+            'driver' => 'single',
+            'path' => storage_path('logs/printer.log'),
+            'level' => env('LOG_LEVEL', 'debug'),
+            'replace_placeholders' => true,
+        ],
+
+        'analytics' => [
+            'driver' => 'single',
+            'path' => storage_path('logs/analytics.log'),
+            'level' => env('LOG_LEVEL', 'debug'),
+            'replace_placeholders' => true,
+        ],
+
         'daily' => [
             'driver' => 'daily',
             'path' => storage_path('logs/laravel.log'),

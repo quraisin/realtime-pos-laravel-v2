@@ -72,10 +72,18 @@ Aplikasi ini menyinkronkan alur operasional bisnis secara utuh: mulai dari penge
 
 ---
 
-### 6. 📑 Laravel Log Viewer (`opcodesio/log-viewer`) (`/log-viewer` & `/logs`)
-* **Integrasi `opcodesio/log-viewer`**: UI modern untuk monitoring log aplikasi Laravel.
-* **Antarmuka Dark Mode & Navigasi Cepat**: Navigasi selaras dengan tema sistem dan tombol kembali ke POS.
-* **Filter Severity & Latency Tracking**: Memantau event `[ORDER CREATED]` dan durasi cetak struk `[RECEIPT PRINTED]` secara detail.
+### 6. 📑 Laravel Log Viewer & Categorized Feature Logging (`/log-viewer` & `/logs`)
+* **Integrasi `opcodesio/log-viewer`**: UI modern untuk monitoring log aplikasi Laravel dengan tema gelap (*dark mode*) dan navigasi langsung ke POS.
+* **Logging Terkelompok Per-Fitur (*Feature-Grouped Channels*)**: Setiap fitur aplikasi memiliki kanal log terdedikasi yang tercatat ke dalam file terpisah (`storage/logs/*.log`) serta terkonsolidasi di `laravel.log`:
+  * `auth.log`: Aktivitas login berhasil/gagal, logout, dan pembatasan hak akses (RBAC).
+  * `pos.log`: Transaksi checkout kasir, validasi kecukupan stok produk, dan pembayaran tunai.
+  * `transaction.log`: Riwayat transaksi, pembatalan (*void order*), perubahan catatan menu/transaksi, dan ekspor CSV.
+  * `kds.log`: Siklus status pesanan dapur (`pending` ➔ `preparing` ➔ `ready` ➔ `completed`) dan checklist koki.
+  * `cms.log`: Pengelolaan katalog produk/menu, penyesuaian stok, status aktif/nonaktif, dan kategori Superadmin.
+  * `printer.log`: Riwayat perintah spooler printer Windows, cetak struk kasir & dapur, latensi cetak, dan konfigurasi printer.
+  * `analytics.log`: Pemanggilan data analitik dan laporan penjualan.
+* **Format Terstruktur & Metadata Lengkap**: Format log standar `[FITUR] [ACTION] Pesan`, dilengkapi metadata ID pengguna, alamat IP, dan nomor referensi transaksi.
+* **Filter Severity & Latency Tracking**: Memantau event `[ORDER CREATED]`, latensi cetak struk `[RECEIPT PRINTED]`, hingga peringatan stok secara instan.
 
 ---
 

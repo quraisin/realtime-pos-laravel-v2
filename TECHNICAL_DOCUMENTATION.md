@@ -1,8 +1,8 @@
 # Dokumentasi Teknis Sistem Qurais Kitchen POS Realtime, Dashboard & Kitchen Display System (KDS)
 
-> **Terakhir Diperbarui Otomatis:** 10 October 2026, 10:52:44 UTC  
+> **Terakhir Diperbarui Otomatis:** 12 October 2026, 18:07:31 UTC  
 > **Versi Sistem:** 1.1.0 (Dashboard & Multi-Portal Production Ready)  
-> **Status Unit Test:** 54 Passed (280 Assertions) across 12 test files  
+> **Status Unit Test:** 54 Passed (280 Assertions) across 13 test files  
 
 ## 1. Arsitektur & Teknologi (Tech Stack)
 
@@ -29,6 +29,15 @@ Sistem menyediakan 3 portal login terpisah dengan isolasi hak akses serta pengal
 
 ### Matriks Permission Spatie
 
+- **Role `cashier`**:
+  - `pos.access`
+  - `transactions.access`
+  - `transactions.void`
+  - `analytics.access`
+  - `printer.settings`
+- **Role `kitchen`**:
+  - `kds.access`
+  - `kds.update_status`
 - **Role `superadmin`**:
   - `pos.access`
   - `transactions.access`

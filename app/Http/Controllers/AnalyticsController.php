@@ -147,6 +147,17 @@ class AnalyticsController extends Controller
             $cursor->addDay();
         }
 
+        \App\Services\FeatureLog::analytics(
+            'SUMMARY_REQUESTED',
+            "Ringkasan analitik kasir dimuat untuk periode '{$period}' | Total Omset: Rp " . number_format($totalRevenue, 0, ',', '.') . " | Total Transaksi: {$totalOrders} | Item Terjual: {$totalItemsSold}",
+            [
+                'period' => $period,
+                'total_revenue' => $totalRevenue,
+                'total_orders' => $totalOrders,
+                'total_items_sold' => $totalItemsSold,
+            ]
+        );
+
         return response()->json([
             'success' => true,
             'period' => $period,

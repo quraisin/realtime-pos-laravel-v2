@@ -50,6 +50,10 @@ class CmsAuthController extends Controller
             ->first();
 
         if (!$user || !Hash::check($password, $user->password)) {
+            \App\Services\FeatureLog::auth('CMS_LOGIN_FAILED', "Percobaan login CMS gagal untuk username/email: '{$usernameInput}'", [
+                'username_input' => $usernameInput,
+            ], 'warning');
+
             if ($request->wantsJson()) {
                 return response()->json([
                     'success' => false,
@@ -66,6 +70,12 @@ class CmsAuthController extends Controller
         if (!$user->hasRole('superadmin') && !$user->hasPermissionTo('cms.access')) {
             $msg = 'Akun ini tidak memiliki hak akses Superadmin Qurais Kitchen Dashboard.';
 
+            \App\Services\FeatureLog::auth('CMS_ACCESS_DENIED', "Pengguna '{$user->username}' ditolak akses ke CMS Superadmin. Hak akses tidak mencukupi", [
+                'user_id' => $user->id,
+                'username' => $user->username,
+                'roles' => $user->getRoleNames()->toArray(),
+            ], 'warning');
+
             if ($request->wantsJson()) {
                 return response()->json([
                     'success' => false,
@@ -79,6 +89,12 @@ class CmsAuthController extends Controller
         // Authenticate the user
         Auth::login($user, $request->boolean('remember', true));
         $request->session()->regenerate();
+
+        \App\Services\FeatureLog::auth('CMS_LOGIN_SUCCESS', "Superadmin '{$user->username}' ({$user->name}) berhasil login ke CMS Dashboard", [
+            'user_id' => $user->id,
+            'username' => $user->username,
+            'email' => $user->email,
+        ]);
 
         $redirectUrl = route('cms.index');
 
@@ -104,6 +120,14 @@ class CmsAuthController extends Controller
      */
     public function logout(Request $request): JsonResponse|RedirectResponse
     {
+        $currentUser = Auth::user();
+        if ($currentUser) {
+            \App\Services\FeatureLog::auth('CMS_LOGOUT', "Superadmin '{$currentUser->username}' ({$currentUser->name}) logout dari CMS", [
+                'user_id' => $currentUser->id,
+                'username' => $currentUser->username,
+            ]);
+        }
+
         Auth::logout();
         $request->session()->invalidate();
         $request->session()->regenerateToken();

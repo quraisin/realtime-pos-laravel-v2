@@ -49,6 +49,8 @@ class PosController extends Controller
             ->orderBy('sort_order')
             ->get();
 
+        \App\Services\FeatureLog::pos('GET_CATEGORIES', "Kasir memuat {$categories->count()} kategori aktif", [], 'debug');
+
         return response()->json([
             'success' => true,
             'categories' => $categories,
@@ -75,6 +77,11 @@ class PosController extends Controller
         }
 
         $products = $query->orderBy('name')->get();
+
+        \App\Services\FeatureLog::pos('GET_PRODUCTS', "Kasir memuat menu produk ({$products->count()} menu)", [
+            'category_id' => $request->input('category_id'),
+            'search' => $request->input('search'),
+        ], 'debug');
 
         return response()->json([
             'success' => true,
@@ -116,6 +123,13 @@ class PosController extends Controller
 
                 // Validate stock availability
                 if ($product->stock < $qty) {
+                    \App\Services\FeatureLog::pos('INSUFFICIENT_STOCK', "Gagal membuat pesanan: Stok untuk '{$product->name}' tidak mencukupi (Tersisa: {$product->stock}, Diminta: {$qty})", [
+                        'product_id' => $product->id,
+                        'product_name' => $product->name,
+                        'current_stock' => $product->stock,
+                        'requested_qty' => $qty,
+                    ], 'warning');
+
                     return response()->json([
                         'success' => false,
                         'message' => "Stok untuk produk '{$product->name}' tidak mencukupi (Tersisa: {$product->stock} porsi)!",
@@ -152,6 +166,11 @@ class PosController extends Controller
 
             if ($paymentMethod === 'cash') {
                 if ($cashTendered < $totalAmount) {
+                    \App\Services\FeatureLog::pos('INSUFFICIENT_CASH', "Gagal checkout pesanan: Uang tunai kurang (Tagihan: Rp " . number_format($totalAmount, 0, ',', '.') . ", Diterima: Rp " . number_format($cashTendered, 0, ',', '.') . ")", [
+                        'total_amount' => $totalAmount,
+                        'cash_tendered' => $cashTendered,
+                    ], 'warning');
+
                     return response()->json([
                         'success' => false,
                         'message' => 'Uang tunai yang diterima kurang dari total tagihan!',
@@ -201,15 +220,29 @@ class PosController extends Controller
             // Refresh loaded items and cashier relations so receipt services have full data
             $order->load(['items.product', 'cashier']);
 
-            // Log Order Created
-            Log::info(sprintf(
-                "[ORDER CREATED] Order #%s created | Items: %d | Total: Rp %s | Cashier: %s | Type: %s",
-                $order->order_number,
-                $order->items->count(),
-                number_format($order->total_amount, 0, ',', '.'),
-                $order->cashier?->name ?: 'Kasir POS',
-                strtoupper((string)$order->order_type)
-            ));
+            // Log Order Created (Categorized in pos channel and single channel)
+            \App\Services\FeatureLog::pos(
+                'ORDER_CREATED',
+                sprintf(
+                    "[ORDER CREATED] Order #%s created | Items: %d | Total: Rp %s | Cashier: %s | Type: %s | Table: %s | Customer: %s",
+                    $order->order_number,
+                    $order->items->count(),
+                    number_format($order->total_amount, 0, ',', '.'),
+                    $order->cashier?->name ?: 'Kasir POS',
+                    strtoupper((string)$order->order_type),
+                    $order->table_number,
+                    $order->customer_name
+                ),
+                [
+                    'order_id' => $order->id,
+                    'order_number' => $order->order_number,
+                    'customer_name' => $order->customer_name,
+                    'table_number' => $order->table_number,
+                    'total_amount' => $order->total_amount,
+                    'payment_method' => $order->payment_method,
+                    'items_count' => $order->items->count(),
+                ]
+            );
 
             // Realtime Update Signals:
             // 1. Update cache timestamp for SSE long polling / stream

@@ -104,6 +104,19 @@ class KdsController extends Controller
 
         $order->update($updates);
 
+        \App\Services\FeatureLog::kds(
+            'STATUS_UPDATED',
+            "Status pesanan #{$order->order_number} diubah dari '" . strtoupper($prevStatus) . "' menjadi '" . strtoupper($newStatus) . "' (Pelanggan: {$order->customer_name}, Meja: {$order->table_number})",
+            [
+                'order_id' => $order->id,
+                'order_number' => $order->order_number,
+                'prev_status' => $prevStatus,
+                'new_status' => $newStatus,
+                'customer_name' => $order->customer_name,
+                'table_number' => $order->table_number,
+            ]
+        );
+
         // Signal SSE & Broadcast
         Cache::put('kds_last_update', microtime(true), 3600);
         event(new OrderStatusUpdated($order, $prevStatus));
@@ -128,11 +141,32 @@ class KdsController extends Controller
         $order = $item->order;
         $allItemsPrepared = $order->items()->where('is_prepared', false)->count() === 0;
 
+        \App\Services\FeatureLog::kds(
+            'ITEM_TOGGLED',
+            "Menu '{$item->product_name}' (Order #{$order->order_number}) ditandai " . ($item->is_prepared ? 'SELESAI (SIAP SAJI)' : 'BELUM SELESAI'),
+            [
+                'item_id' => $item->id,
+                'product_name' => $item->product_name,
+                'order_id' => $order->id,
+                'order_number' => $order->order_number,
+                'is_prepared' => $item->is_prepared,
+            ]
+        );
+
         if ($allItemsPrepared && $order->kitchen_status === 'preparing') {
             $order->update([
                 'kitchen_status' => 'ready',
                 'kitchen_ready_at' => now(),
             ]);
+
+            \App\Services\FeatureLog::kds(
+                'ALL_ITEMS_READY',
+                "Seluruh menu pada Order #{$order->order_number} telah selesai dipersiapkan. Status dapur otomatis beralih ke READY",
+                [
+                    'order_id' => $order->id,
+                    'order_number' => $order->order_number,
+                ]
+            );
         }
 
         Cache::put('kds_last_update', microtime(true), 3600);

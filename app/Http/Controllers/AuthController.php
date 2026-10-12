@@ -70,6 +70,10 @@ class AuthController extends Controller
             ->first();
 
         if (!$user || !Hash::check($password, $user->password)) {
+            \App\Services\FeatureLog::auth('LOGIN_FAILED', "Percobaan login gagal untuk username/email: '{$usernameInput}'", [
+                'username_input' => $usernameInput,
+            ], 'warning');
+
             if ($request->wantsJson()) {
                 return response()->json([
                     'success' => false,
@@ -87,6 +91,13 @@ class AuthController extends Controller
             $roleLabel = $expectedRole === 'kitchen' ? 'Dapur (KDS)' : 'Kasir';
             $msg = "Akun ini tidak memiliki hak akses sebagai {$roleLabel}.";
 
+            \App\Services\FeatureLog::auth('ROLE_UNAUTHORIZED', "Pengguna '{$user->username}' ditolak login ke portal {$expectedRole}", [
+                'user_id' => $user->id,
+                'username' => $user->username,
+                'expected_role' => $expectedRole,
+                'actual_roles' => $user->getRoleNames()->toArray(),
+            ], 'warning');
+
             if ($request->wantsJson()) {
                 return response()->json([
                     'success' => false,
@@ -100,6 +111,12 @@ class AuthController extends Controller
         // Authenticate the user
         Auth::login($user, $request->boolean('remember', true));
         $request->session()->regenerate();
+
+        \App\Services\FeatureLog::auth('LOGIN_SUCCESS', "Pengguna '{$user->username}' ({$user->name}) berhasil login", [
+            'user_id' => $user->id,
+            'username' => $user->username,
+            'roles' => $user->getRoleNames()->toArray(),
+        ]);
 
         $redirectUrl = $this->determineRedirectUrl($user);
 
@@ -125,6 +142,14 @@ class AuthController extends Controller
      */
     public function logout(Request $request): JsonResponse|RedirectResponse
     {
+        $currentUser = Auth::user();
+        if ($currentUser) {
+            \App\Services\FeatureLog::auth('LOGOUT', "Pengguna '{$currentUser->username}' ({$currentUser->name}) berhasil logout", [
+                'user_id' => $currentUser->id,
+                'username' => $currentUser->username,
+            ]);
+        }
+
         Auth::logout();
         $request->session()->invalidate();
         $request->session()->regenerateToken();

@@ -106,6 +106,12 @@ class CmsController extends Controller
         $category = Category::create($validated);
         $category->loadCount(['allProducts as total_products_count', 'products as active_products_count']);
 
+        \App\Services\FeatureLog::cms('CATEGORY_CREATED', "Kategori baru '{$category->name}' (Slug: {$category->slug}) berhasil dibuat", [
+            'category_id' => $category->id,
+            'name' => $category->name,
+            'slug' => $category->slug,
+        ]);
+
         return response()->json([
             'success' => true,
             'message' => "Kategori '{$category->name}' berhasil ditambahkan.",
@@ -136,6 +142,12 @@ class CmsController extends Controller
         $category->update($validated);
         $category->loadCount(['allProducts as total_products_count', 'products as active_products_count']);
 
+        \App\Services\FeatureLog::cms('CATEGORY_UPDATED', "Kategori '{$category->name}' (ID: {$category->id}) berhasil diperbarui", [
+            'category_id' => $category->id,
+            'name' => $category->name,
+            'slug' => $category->slug,
+        ]);
+
         return response()->json([
             'success' => true,
             'message' => "Kategori '{$category->name}' berhasil diperbarui.",
@@ -151,6 +163,12 @@ class CmsController extends Controller
         $category = Category::withCount('allProducts')->findOrFail($id);
 
         if ($category->all_products_count > 0) {
+            \App\Services\FeatureLog::cms('CATEGORY_DELETE_BLOCKED', "Penghapusan kategori '{$category->name}' ditolak karena masih memiliki {$category->all_products_count} menu terkait", [
+                'category_id' => $id,
+                'name' => $category->name,
+                'product_count' => $category->all_products_count,
+            ], 'warning');
+
             return response()->json([
                 'success' => false,
                 'message' => "Tidak dapat menghapus kategori '{$category->name}' karena masih memiliki {$category->all_products_count} menu terkait. Silakan pindahkan atau hapus menu terlebih dahulu.",
@@ -159,6 +177,11 @@ class CmsController extends Controller
 
         $name = $category->name;
         $category->delete();
+
+        \App\Services\FeatureLog::cms('CATEGORY_DELETED', "Kategori '{$name}' (ID: {$id}) berhasil dihapus", [
+            'category_id' => $id,
+            'name' => $name,
+        ]);
 
         return response()->json([
             'success' => true,
@@ -251,6 +274,15 @@ class CmsController extends Controller
         $product = Product::create($validated);
         $product->load('category');
 
+        \App\Services\FeatureLog::cms('PRODUCT_CREATED', "Menu baru '{$product->name}' (SKU: {$product->sku}, Kategori: {$product->category?->name}, Harga: Rp " . number_format($product->price, 0, ',', '.') . ", Stok: {$product->stock}) ditambahkan", [
+            'product_id' => $product->id,
+            'name' => $product->name,
+            'sku' => $product->sku,
+            'category_id' => $product->category_id,
+            'price' => $product->price,
+            'stock' => $product->stock,
+        ]);
+
         return response()->json([
             'success' => true,
             'message' => "Menu '{$product->name}' berhasil ditambahkan ke Qurais Kitchen.",
@@ -296,6 +328,14 @@ class CmsController extends Controller
         $product->update($validated);
         $product->load('category');
 
+        \App\Services\FeatureLog::cms('PRODUCT_UPDATED', "Menu '{$product->name}' (ID: {$product->id}, SKU: {$product->sku}) diperbarui. Harga: Rp " . number_format($product->price, 0, ',', '.') . ", Stok: {$product->stock}", [
+            'product_id' => $product->id,
+            'name' => $product->name,
+            'sku' => $product->sku,
+            'price' => $product->price,
+            'stock' => $product->stock,
+        ]);
+
         return response()->json([
             'success' => true,
             'message' => "Menu '{$product->name}' berhasil diperbarui.",
@@ -314,6 +354,12 @@ class CmsController extends Controller
 
         $statusLabel = $product->is_available ? 'Aktif (Tersedia)' : 'Nonaktif (Habis)';
 
+        \App\Services\FeatureLog::cms('PRODUCT_STATUS_TOGGLED', "Status ketersediaan menu '{$product->name}' (ID: {$product->id}) diubah menjadi {$statusLabel}", [
+            'product_id' => $product->id,
+            'name' => $product->name,
+            'is_available' => $product->is_available,
+        ]);
+
         return response()->json([
             'success' => true,
             'message' => "Status menu '{$product->name}' diubah menjadi {$statusLabel}.",
@@ -331,8 +377,16 @@ class CmsController extends Controller
         ]);
 
         $product = Product::findOrFail($id);
+        $oldStock = $product->stock;
         $product->stock = (int)$request->input('stock');
         $product->save();
+
+        \App\Services\FeatureLog::cms('STOCK_UPDATED', "Stok menu '{$product->name}' (ID: {$product->id}) disesuaikan dari {$oldStock} menjadi {$product->stock} porsi", [
+            'product_id' => $product->id,
+            'name' => $product->name,
+            'old_stock' => $oldStock,
+            'new_stock' => $product->stock,
+        ]);
 
         return response()->json([
             'success' => true,
@@ -348,6 +402,7 @@ class CmsController extends Controller
     {
         $product = Product::findOrFail($id);
         $name = $product->name;
+        $sku = $product->sku;
 
         // Check if product is in order items
         $hasOrders = OrderItem::where('product_id', $product->id)->exists();
@@ -357,6 +412,12 @@ class CmsController extends Controller
         }
 
         $product->delete();
+
+        \App\Services\FeatureLog::cms('PRODUCT_DELETED', "Menu '{$name}' (ID: {$id}, SKU: {$sku}) dihapus dari Qurais Kitchen", [
+            'product_id' => $id,
+            'name' => $name,
+            'sku' => $sku,
+        ]);
 
         return response()->json([
             'success' => true,
@@ -568,6 +629,19 @@ class CmsController extends Controller
                     'created_at' => $order->created_at->toIso8601String(),
                 ];
             });
+
+        \App\Services\FeatureLog::cms(
+            'ANALYTICS_ACCESSED',
+            "Superadmin memuat analitik CMS periode '{$period}' | Omset: Rp " . number_format($totalGrossRevenue, 0, ',', '.') . " | Laba Bersih: Rp " . number_format($totalNetProfit, 0, ',', '.') . " | Margin: {$profitMarginPct}% | Pesanan: {$totalOrdersCount}",
+            [
+                'period' => $period,
+                'total_gross_revenue' => $totalGrossRevenue,
+                'total_net_profit' => $totalNetProfit,
+                'profit_margin_pct' => $profitMarginPct,
+                'total_orders' => $totalOrdersCount,
+            ],
+            'debug'
+        );
 
         return response()->json([
             'success' => true,
