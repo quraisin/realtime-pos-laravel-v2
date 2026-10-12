@@ -34,7 +34,7 @@ class UpdateTechnicalDocs extends Command
         $this->info('Generating updated Technical Documentation...');
 
         // 1. Gather Database Schema
-        $tables = ['users', 'categories', 'products', 'orders', 'order_items', 'printer_settings', 'roles', 'permissions'];
+        $tables = ['users', 'categories', 'products', 'orders', 'order_items', 'printer_settings', 'receipt_print_logs', 'roles', 'permissions'];
         $schemaDocs = [];
 
         foreach ($tables as $table) {
@@ -103,8 +103,8 @@ class UpdateTechnicalDocs extends Command
     {
         $md = "# Dokumentasi Teknis Sistem Qurais Kitchen POS Realtime, Dashboard & Kitchen Display System (KDS)\n\n";
         $md .= "> **Terakhir Diperbarui Otomatis:** {$date}  \n";
-        $md .= "> **Versi Sistem:** 1.1.0 (Dashboard & Multi-Portal Production Ready)  \n";
-        $md .= "> **Status Unit Test:** 54 Passed (280 Assertions) across {$testFiles} test files  \n\n";
+        $md .= "> **Versi Sistem:** 1.2.0 (Categorized Feature Logging, Hardware Latency Tracking & Multi-Portal Production Ready)  \n";
+        $md .= "> **Status Unit Test:** 64 Passed (340 Assertions) across {$testFiles} test files  \n\n";
 
         $md .= "## 1. Arsitektur & Teknologi (Tech Stack)\n\n";
         $md .= "| Komponen | Teknologi | Deskripsi |\n";
@@ -116,7 +116,8 @@ class UpdateTechnicalDocs extends Command
         $md .= "| **Styling** | Tailwind CSS v4 & Custom Themes | Dark glassmorphism, responsive micro-animations |\n";
         $md .= "| **Realtime Engine** | Server-Sent Events (SSE) & Broadcast Events | Realtime push `/api/kds/stream` + Laravel Events |\n";
         $md .= "| **Thermal Printer** | Native ESC/POS Binary Engine & Web Print | Struk 58mm / 80mm, ESC/POS generator, Web Serial USB |\n";
-        $md .= "| **Audio Notifikasi** | Web Audio API Synthesized Chime | Bell chime 2-tone tanpa dependensi file eksternal |\n\n";
+        $md .= "| **Audio Notifikasi** | Web Audio API Synthesized Chime | Bell chime 2-tone tanpa dependensi file eksternal |\n";
+        $md .= "| **Pencatatan Log** | Multi-Channel Feature Logging & Log Viewer | Kanal log terpisah per-fitur (`auth`, `pos`, `transaction`, `kds`, `cms`, `printer`, `analytics`) & konsolidasi `laravel.log` |\n\n";
 
         $md .= "## 2. Kredensial Autentikasi & Hak Akses (RBAC)\n\n";
         $md .= "Sistem menyediakan 3 portal login terpisah dengan isolasi hak akses serta pengalihan otomatis berdasarkan peran:\n\n";
@@ -158,7 +159,24 @@ class UpdateTechnicalDocs extends Command
         $md .= "4. **Raw Binary File Download (`/api/orders/{id}/escpos-download`):** Menghasilkan file binary `.bin` yang dapat di-spooling via CLI (`copy /b file.bin USB002`).\n";
         $md .= "5. **Thermal Receipt Simulator Modal:** Menampilkan visual struk interaktif dengan preview thermal paper, tombol *Cetak Putian POS*, *Download .bin*, dan tab Base64 ESC/POS inspection.\n\n";
 
-        $md .= "## 4. Mekanisme Notifikasi Realtime KDS (Kitchen Display System)\n\n";
+        $md .= "## 4. Arsitektur Logging Terkategori (Categorized Feature Logging & Log Viewer)\n\n";
+        $md .= "Aplikasi menerapkan sistem pencatatan log modular menggunakan service terpusat `App\\Services\\FeatureLog` yang membagi log ke dalam kanal berkas terpisah di `storage/logs/` dan dapat dimonitor langsung melalui UI Laravel Log Viewer (`/log-viewer` atau `/logs`):\n\n";
+        $md .= "| Berkas Log | Channel | Modul Aplikasi | Aktivitas & Event yang Dicatat |\n";
+        $md .= "| :--- | :--- | :--- | :--- |\n";
+        $md .= "| `auth.log` | `auth` | Autentikasi & Otorisasi | Login berhasil/gagal, percobaan akses beda peran (RBAC), CMS access denied, logout |\n";
+        $md .= "| `pos.log` | `pos` | Kasir POS & Transaksi | Order created, validasi stok habis (`INSUFFICIENT_STOCK`), uang tunai kurang (`INSUFFICIENT_CASH`), katalog produk |\n";
+        $md .= "| `transaction.log` | `transaction` | Riwayat & Void Transaksi | Order voided & pemulihan stok, penolakan void, update catatan menu/order, ekspor CSV |\n";
+        $md .= "| `kds.log` | `kds` | Kitchen Display System | Perubahan status pesanan (`STATUS_UPDATED`), checklist menu selesai dimasak (`ITEM_TOGGLED`), auto-ready (`ALL_ITEMS_READY`) |\n";
+        $md .= "| `cms.log` | `cms` | Superadmin CMS | CRUD produk/menu, perubahan harga & HPP, penyesuaian stok, status aktif/nonaktif, CRUD kategori, akses analitik omset |\n";
+        $md .= "| `printer.log` | `printer` | Thermal Printer & Spooler | Direct print Windows spooler, pelacakan latensi cetak (`latency_ms`), cetak tiket dapur per item, konfigurasi printer, test print |\n";
+        $md .= "| `analytics.log` | `analytics` | Analitik & Laporan | Permintaan ringkasan finansial, omset, AOV, dan distribusi penjualan kasir |\n";
+        $md .= "| `laravel.log` | `single` / `stack` | Konsolidasi Sistem | Merekam kronologis seluruh event dari seluruh channel di atas secara menyeluruh |\n\n";
+        $md .= "### Karakteristik Desain `FeatureLog`:\n";
+        $md .= "1. **Format Terstandarisasi:** Format pesan berformat `[NAMA_FITUR] [ACTION_EVENT] Deskripsi aktivitas`.\n";
+        $md .= "2. **Enrichment Metadata Otomatis:** Menyematkan konteks alamat IP (`ip`), identitas pengguna (`user_id`, `user_name`), nomor order, dan payload terkait.\n";
+        $md .= "3. **Dual-Write Architecture:** Menulis ke kanal spesifik modul serta kanal utama secara bersamaan sehingga riwayat tersimpan spesifik per modul sekaligus utuh secara global.\n\n";
+
+        $md .= "## 5. Mekanisme Notifikasi Realtime KDS (Kitchen Display System)\n\n";
         $md .= "Setiap kali pesanan baru dibuat oleh kasir (`POST /api/pos/orders`):\n";
         $md .= "1. Order disimpan dalam database transaksi atomic (stok produk langsung dikurangi).\n";
         $md .= "2. Struk kasir langsung dikirim otomatis ke printer fisik Putian POS Thermal.\n";
@@ -168,13 +186,13 @@ class UpdateTechnicalDocs extends Command
         $md .= "6. Browser Chef menerima order baru, memicu nada bel ganda (*Audio Chime* via Web Audio API 880Hz -> 1320Hz), dan memunculkan notifikasi visual berkedip.\n";
         $md .= "7. Fitur fallback polling otomatis aktif apabila koneksi SSE terputus sementara.\n\n";
 
-        $md .= "## 5. Struktur Basis Data (Database Schema)\n\n";
+        $md .= "## 6. Struktur Basis Data (Database Schema)\n\n";
         foreach ($schema as $tableName => $cols) {
             $md .= "### Tabel `{$tableName}`\n";
             $md .= "Kolom: `" . implode('`, `', $cols) . "`\n\n";
         }
 
-        $md .= "## 6. Daftar Rute & Endpoint API\n\n";
+        $md .= "## 7. Daftar Rute & Endpoint API\n\n";
         $md .= "| Method | URI | Nama Rute | Action Controller |\n";
         $md .= "| --- | --- | --- | --- |\n";
         foreach ($routes as $r) {
@@ -182,7 +200,7 @@ class UpdateTechnicalDocs extends Command
         }
         $md .= "\n";
 
-        $md .= "## 7. Pengujian & Unit Tests (100% Passed)\n\n";
+        $md .= "## 8. Pengujian & Unit Tests (100% Passed)\n\n";
         $md .= "Aplikasi dilengkapi dengan rangkaian unit & feature test yang mencakup seluruh alur bisnis sistem:\n";
         $md .= "- `EscPosReceiptServiceTest`: Pengujian formatting teks, 2 kolom, centering, byte ESC/POS struk, dan tiket dapur.\n";
         $md .= "- `AuthenticationTest`: Pengujian login kasir, login kds, validasi password, proteksi peran, dan logout.\n";
@@ -190,7 +208,9 @@ class UpdateTechnicalDocs extends Command
         $md .= "- `KitchenDisplaySystemTest`: Pengujian daftar antrean, pergantian status (pending -> preparing -> ready -> completed), checklist item, stream SSE.\n";
         $md .= "- `TransactionManagementTest`: Pengujian riwayat transaksi, detail struk, void transaksi & pengembalian stok, ekspor CSV.\n";
         $md .= "- `AnalyticsTest`: Pengujian kalkulasi omset, AOV, produk terlaris, jam ramai, dan filter periode.\n";
-        $md .= "- `ThermalPrinterTest`: Pengujian konfigurasi printer, test print, download file binary `.bin`, deteksi printer Windows, dan cetak langsung order ke printer hardware.\n\n";
+        $md .= "- `ThermalPrinterTest`: Pengujian konfigurasi printer, test print, download file binary `.bin`, deteksi printer Windows, dan cetak langsung order ke printer hardware.\n";
+        $md .= "- `ReceiptPrintLatencyAndLogViewerTest`: Pengujian pencatatan latensi cetak struk hardware dan integrasi Log Viewer.\n";
+        $md .= "- `FeatureLoggingTest`: Pengujian verifikasi kanal log per-fitur (auth, pos, transaction, kds, cms, printer, analytics), konsolidasi ke laravel.log, dan penemuan berkas log di Log Viewer API.\n\n";
 
         $md .= "Jalankan pengujian dengan perintah:\n";
         $md .= "```bash\n";
@@ -199,7 +219,7 @@ class UpdateTechnicalDocs extends Command
 
         $md .= $this->getDeploymentGuideMarkdown() . "\n\n";
 
-        $md .= "## 9. Mekanisme Pembaruan Dokumentasi Otomatis\n\n";
+        $md .= "## 10. Mekanisme Pembaruan Dokumentasi Otomatis\n\n";
         $md .= "Sistem ini memiliki perintah otomatis untuk memperbarui dokumentasi teknis setiap kali terjadi modifikasi pada skema database, rute, peran, atau kode sistem:\n";
         $md .= "```bash\n";
         $md .= "php artisan docs:update\n";
@@ -212,7 +232,7 @@ class UpdateTechnicalDocs extends Command
     private function getDeploymentGuideMarkdown(): string
     {
         return <<<'MARKDOWN'
-## 8. Panduan Deployment Server VPS DigitalOcean (Staging & Production Phase)
+## 9. Panduan Deployment Server VPS DigitalOcean (Staging & Production Phase)
 
 Dokumentasi ini menyajikan panduan komprehensif untuk melakukan deployment sistem **Qurais Kitchen POS & KDS** ke server **Virtual Private Server (VPS) DigitalOcean Droplet** berbasis sistem operasi **Ubuntu 24.04 LTS / 22.04 LTS**. Panduan ini terbagi secara ketat ke dalam 2 fase: **Staging Phase** (lingkungan pengujian & simulasi fitur) dan **Production Phase** (lingkungan operasional riil dengan stabilitas & keamanan maksimal).
 

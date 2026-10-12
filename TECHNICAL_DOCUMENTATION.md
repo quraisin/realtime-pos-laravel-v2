@@ -1,8 +1,8 @@
 # Dokumentasi Teknis Sistem Qurais Kitchen POS Realtime, Dashboard & Kitchen Display System (KDS)
 
-> **Terakhir Diperbarui Otomatis:** 12 October 2026, 18:07:31 UTC  
-> **Versi Sistem:** 1.1.0 (Dashboard & Multi-Portal Production Ready)  
-> **Status Unit Test:** 54 Passed (280 Assertions) across 13 test files  
+> **Terakhir Diperbarui Otomatis:** 12 October 2026, 18:16:07 UTC  
+> **Versi Sistem:** 1.2.0 (Categorized Feature Logging, Hardware Latency Tracking & Multi-Portal Production Ready)  
+> **Status Unit Test:** 64 Passed (340 Assertions) across 13 test files  
 
 ## 1. Arsitektur & Teknologi (Tech Stack)
 
@@ -16,6 +16,7 @@
 | **Realtime Engine** | Server-Sent Events (SSE) & Broadcast Events | Realtime push `/api/kds/stream` + Laravel Events |
 | **Thermal Printer** | Native ESC/POS Binary Engine & Web Print | Struk 58mm / 80mm, ESC/POS generator, Web Serial USB |
 | **Audio Notifikasi** | Web Audio API Synthesized Chime | Bell chime 2-tone tanpa dependensi file eksternal |
+| **Pencatatan Log** | Multi-Channel Feature Logging & Log Viewer | Kanal log terpisah per-fitur (`auth`, `pos`, `transaction`, `kds`, `cms`, `printer`, `analytics`) & konsolidasi `laravel.log` |
 
 ## 2. Kredensial Autentikasi & Hak Akses (RBAC)
 
@@ -29,15 +30,6 @@ Sistem menyediakan 3 portal login terpisah dengan isolasi hak akses serta pengal
 
 ### Matriks Permission Spatie
 
-- **Role `cashier`**:
-  - `pos.access`
-  - `transactions.access`
-  - `transactions.void`
-  - `analytics.access`
-  - `printer.settings`
-- **Role `kitchen`**:
-  - `kds.access`
-  - `kds.update_status`
 - **Role `superadmin`**:
   - `pos.access`
   - `transactions.access`
@@ -75,7 +67,27 @@ Sistem dirancang untuk terhubung dengan berbagai merek printer thermal POS, seca
 4. **Raw Binary File Download (`/api/orders/{id}/escpos-download`):** Menghasilkan file binary `.bin` yang dapat di-spooling via CLI (`copy /b file.bin USB002`).
 5. **Thermal Receipt Simulator Modal:** Menampilkan visual struk interaktif dengan preview thermal paper, tombol *Cetak Putian POS*, *Download .bin*, dan tab Base64 ESC/POS inspection.
 
-## 4. Mekanisme Notifikasi Realtime KDS (Kitchen Display System)
+## 4. Arsitektur Logging Terkategori (Categorized Feature Logging & Log Viewer)
+
+Aplikasi menerapkan sistem pencatatan log modular menggunakan service terpusat `App\Services\FeatureLog` yang membagi log ke dalam kanal berkas terpisah di `storage/logs/` dan dapat dimonitor langsung melalui UI Laravel Log Viewer (`/log-viewer` atau `/logs`):
+
+| Berkas Log | Channel | Modul Aplikasi | Aktivitas & Event yang Dicatat |
+| :--- | :--- | :--- | :--- |
+| `auth.log` | `auth` | Autentikasi & Otorisasi | Login berhasil/gagal, percobaan akses beda peran (RBAC), CMS access denied, logout |
+| `pos.log` | `pos` | Kasir POS & Transaksi | Order created, validasi stok habis (`INSUFFICIENT_STOCK`), uang tunai kurang (`INSUFFICIENT_CASH`), katalog produk |
+| `transaction.log` | `transaction` | Riwayat & Void Transaksi | Order voided & pemulihan stok, penolakan void, update catatan menu/order, ekspor CSV |
+| `kds.log` | `kds` | Kitchen Display System | Perubahan status pesanan (`STATUS_UPDATED`), checklist menu selesai dimasak (`ITEM_TOGGLED`), auto-ready (`ALL_ITEMS_READY`) |
+| `cms.log` | `cms` | Superadmin CMS | CRUD produk/menu, perubahan harga & HPP, penyesuaian stok, status aktif/nonaktif, CRUD kategori, akses analitik omset |
+| `printer.log` | `printer` | Thermal Printer & Spooler | Direct print Windows spooler, pelacakan latensi cetak (`latency_ms`), cetak tiket dapur per item, konfigurasi printer, test print |
+| `analytics.log` | `analytics` | Analitik & Laporan | Permintaan ringkasan finansial, omset, AOV, dan distribusi penjualan kasir |
+| `laravel.log` | `single` / `stack` | Konsolidasi Sistem | Merekam kronologis seluruh event dari seluruh channel di atas secara menyeluruh |
+
+### Karakteristik Desain `FeatureLog`:
+1. **Format Terstandarisasi:** Format pesan berformat `[NAMA_FITUR] [ACTION_EVENT] Deskripsi aktivitas`.
+2. **Enrichment Metadata Otomatis:** Menyematkan konteks alamat IP (`ip`), identitas pengguna (`user_id`, `user_name`), nomor order, dan payload terkait.
+3. **Dual-Write Architecture:** Menulis ke kanal spesifik modul serta kanal utama secara bersamaan sehingga riwayat tersimpan spesifik per modul sekaligus utuh secara global.
+
+## 5. Mekanisme Notifikasi Realtime KDS (Kitchen Display System)
 
 Setiap kali pesanan baru dibuat oleh kasir (`POST /api/pos/orders`):
 1. Order disimpan dalam database transaksi atomic (stok produk langsung dikurangi).
@@ -86,7 +98,7 @@ Setiap kali pesanan baru dibuat oleh kasir (`POST /api/pos/orders`):
 6. Browser Chef menerima order baru, memicu nada bel ganda (*Audio Chime* via Web Audio API 880Hz -> 1320Hz), dan memunculkan notifikasi visual berkedip.
 7. Fitur fallback polling otomatis aktif apabila koneksi SSE terputus sementara.
 
-## 5. Struktur Basis Data (Database Schema)
+## 6. Struktur Basis Data (Database Schema)
 
 ### Tabel `users`
 Kolom: `id`, `name`, `email`, `email_verified_at`, `password`, `remember_token`, `created_at`, `updated_at`, `username`
@@ -106,13 +118,16 @@ Kolom: `id`, `order_id`, `product_id`, `product_name`, `price`, `quantity`, `sub
 ### Tabel `printer_settings`
 Kolom: `id`, `store_name`, `store_tagline`, `store_address`, `store_phone`, `paper_size`, `receipt_footer`, `auto_print_cashier`, `auto_print_kitchen`, `cut_paper`, `open_cash_drawer`, `created_at`, `updated_at`, `windows_printer_name`, `direct_hardware_print`
 
+### Tabel `receipt_print_logs`
+Kolom: `id`, `order_id`, `order_number`, `print_method`, `printer_name`, `order_created_at`, `printed_at`, `latency_ms`, `duration_ms`, `status`, `error_message`, `cashier_id`, `created_at`, `updated_at`
+
 ### Tabel `roles`
 Kolom: `id`, `name`, `guard_name`, `created_at`, `updated_at`
 
 ### Tabel `permissions`
 Kolom: `id`, `name`, `guard_name`, `created_at`, `updated_at`
 
-## 6. Daftar Rute & Endpoint API
+## 7. Daftar Rute & Endpoint API
 
 | Method | URI | Nama Rute | Action Controller |
 | --- | --- | --- | --- |
@@ -190,7 +205,7 @@ Kolom: `id`, `name`, `guard_name`, `created_at`, `updated_at`
 | `GET` | `/storage/{path}` | `storage.local` | `Closure` |
 | `PUT` | `/storage/{path}` | `storage.local.upload` | `Closure` |
 
-## 7. Pengujian & Unit Tests (100% Passed)
+## 8. Pengujian & Unit Tests (100% Passed)
 
 Aplikasi dilengkapi dengan rangkaian unit & feature test yang mencakup seluruh alur bisnis sistem:
 - `EscPosReceiptServiceTest`: Pengujian formatting teks, 2 kolom, centering, byte ESC/POS struk, dan tiket dapur.
@@ -200,13 +215,15 @@ Aplikasi dilengkapi dengan rangkaian unit & feature test yang mencakup seluruh a
 - `TransactionManagementTest`: Pengujian riwayat transaksi, detail struk, void transaksi & pengembalian stok, ekspor CSV.
 - `AnalyticsTest`: Pengujian kalkulasi omset, AOV, produk terlaris, jam ramai, dan filter periode.
 - `ThermalPrinterTest`: Pengujian konfigurasi printer, test print, download file binary `.bin`, deteksi printer Windows, dan cetak langsung order ke printer hardware.
+- `ReceiptPrintLatencyAndLogViewerTest`: Pengujian pencatatan latensi cetak struk hardware dan integrasi Log Viewer.
+- `FeatureLoggingTest`: Pengujian verifikasi kanal log per-fitur (auth, pos, transaction, kds, cms, printer, analytics), konsolidasi ke laravel.log, dan penemuan berkas log di Log Viewer API.
 
 Jalankan pengujian dengan perintah:
 ```bash
 php artisan test
 ```
 
-## 8. Panduan Deployment Server VPS DigitalOcean (Staging & Production Phase)
+## 9. Panduan Deployment Server VPS DigitalOcean (Staging & Production Phase)
 
 Dokumentasi ini menyajikan panduan komprehensif untuk melakukan deployment sistem **Qurais Kitchen POS & KDS** ke server **Virtual Private Server (VPS) DigitalOcean Droplet** berbasis sistem operasi **Ubuntu 24.04 LTS / 22.04 LTS**. Panduan ini terbagi secara ketat ke dalam 2 fase: **Staging Phase** (lingkungan pengujian & simulasi fitur) dan **Production Phase** (lingkungan operasional riil dengan stabilitas & keamanan maksimal).
 
@@ -709,7 +726,7 @@ Buat file `/etc/logrotate.d/laravel-pos`:
 - **Log Viewer UI**: Superadmin dapat memantau error log secara langsung melalui `https://pos.domainanda.com/log-viewer`.
 
 
-## 9. Mekanisme Pembaruan Dokumentasi Otomatis
+## 10. Mekanisme Pembaruan Dokumentasi Otomatis
 
 Sistem ini memiliki perintah otomatis untuk memperbarui dokumentasi teknis setiap kali terjadi modifikasi pada skema database, rute, peran, atau kode sistem:
 ```bash

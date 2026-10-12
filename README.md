@@ -5,7 +5,7 @@
 [![React](https://img.shields.io/badge/React-19.x-61DAFB?style=for-the-badge&logo=react&logoColor=black)](https://react.dev)
 [![Vite](https://img.shields.io/badge/Vite-7.x-646CFF?style=for-the-badge&logo=vite&logoColor=white)](https://vitejs.dev)
 [![Tailwind CSS](https://img.shields.io/badge/Tailwind_CSS-v4.0-06B6D4?style=for-the-badge&logo=tailwindcss&logoColor=white)](https://tailwindcss.com)
-[![Tests](https://img.shields.io/badge/Tests-54%20Passed%20(280%20Assertions)-success?style=for-the-badge&logo=phpunit&logoColor=white)](https://phpunit.de)
+[![Tests](https://img.shields.io/badge/Tests-64%20Passed%20(340%20Assertions)-success?style=for-the-badge&logo=phpunit&logoColor=white)](https://phpunit.de)
 
 **Qurais Kitchen POS** adalah sistem aplikasi kasir (*Point of Sale*) modern, **Qurais Kitchen Dashboard** terpadu untuk Superadmin, *Kitchen Display System* (KDS) *real-time*, dan mesin cetak printer thermal (*ESC/POS engine*) yang dirancang khusus untuk restoran, kafe, dan bisnis kuliner berkecepatan tinggi.
 
@@ -186,7 +186,7 @@ composer dev
 
 ## 🧪 Pengujian Otomatis (Testing Suite)
 
-Proyek ini dilengkapi dengan 54 test otomatis yang mencakup seluruh alur bisnis sistem:
+Proyek ini dilengkapi dengan 64 test otomatis yang mencakup seluruh alur bisnis sistem:
 
 ```bash
 php artisan test
@@ -228,9 +228,20 @@ php artisan test
   ✓ superadmin can manage products menu
   ✓ superadmin can retrieve deep cms analytics
   ✓ qurais kitchen brand and cashier name
+  ✓ superadmin can access all features including pos and kds
+  ✓ cashier and kitchen strictly forbidden from dashboard
 
    PASS  Tests\Feature\ExampleTest
   ✓ the application returns a successful response
+
+   PASS  Tests\Feature\FeatureLoggingTest
+  ✓ feature logger writes to dedicated channel files
+  ✓ auth actions are logged to auth channel
+  ✓ order creation is logged to pos channel
+  ✓ kds status update is logged to kds channel
+  ✓ void order is logged to transaction channel
+  ✓ cms operations are logged to cms channel
+  ✓ log viewer discovers all feature log files
 
    PASS  Tests\Feature\KitchenDisplaySystemTest
   ✓ chef can retrieve active kitchen orders
@@ -245,6 +256,7 @@ php artisan test
   ✓ cashier can retrieve categories and products
   ✓ cashier can create order with realtime event and stock reduction
   ✓ cashier cannot checkout cash with insufficient payment
+  ✓ cashier cannot order item when stock insufficient
 
    PASS  Tests\Feature\ReceiptPrintLatencyAndLogViewerTest
   ✓ order creation with auto print records latency and logs
@@ -270,8 +282,8 @@ php artisan test
   ✓ cashier can update item note
   ✓ cashier can update order notes
 
-  Tests:    54 passed (280 assertions)
-  Duration: 9.43s
+  Tests:    64 passed (340 assertions)
+  Duration: 10.85s
 ```
 
 ---
@@ -281,7 +293,7 @@ php artisan test
 ```text
 realtime-pos-system/
 ├── app/
-│   ├── Events/                     # Broadcast events (NewOrderCreated, dll)
+│   ├── Events/                     # Broadcast events (NewOrderCreated, OrderStatusUpdated)
 │   ├── Http/
 │   │   ├── Controllers/
 │   │   │   ├── CmsController.php        # CMS Dashboard, Menu CRUD, Kategori CRUD & Analitik
@@ -289,11 +301,13 @@ realtime-pos-system/
 │   │   │   ├── PosController.php        # Kasir POS & Pembuatan Order
 │   │   │   ├── KdsController.php        # Antrean Dapur & Stream SSE
 │   │   │   ├── ThermalPrinterController # ESC/POS & Hardware Windows Printer
-│   │   │   └── TransactionController    # Riwayat Transaksi & Void
-│   │   └── Middleware/                  # Authenticate & Permission middlewares
-│   ├── Models/                     # Order, OrderItem, Product, Category, PrinterSetting, User
+│   │   │   ├── TransactionController    # Riwayat Transaksi & Void
+│   │   │   └── AnalyticsController      # Ringkasan KPI Finansial Kasir
+│   │   └── Middleware/                  # Authenticate & Spatie Permission middlewares
+│   ├── Models/                     # Order, OrderItem, Product, Category, PrinterSetting, ReceiptPrintLog, User
 │   └── Services/
-│       └── EscPosReceiptService.php # ESC/POS binary & plain text thermal printer builder
+│       ├── EscPosReceiptService.php # ESC/POS binary & plain text thermal printer builder
+│       └── FeatureLog.php           # Multi-Channel Feature Logging Service (Dual-Write)
 ├── database/
 │   ├── migrations/                 # Skema tabel orders, items, products, categories, permissions
 │   └── seeders/DatabaseSeeder.php  # Superadmin (adnan@superadmin.com), Kasir, Chef, Menu, Kategori
