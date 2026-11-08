@@ -1,10 +1,11 @@
 # 🍽️ Qurais Kitchen - Realtime POS, Dashboard & Kitchen Display System (KDS)
 
-[![Laravel](https://img.shields.io/badge/Laravel-12.x-FF2D20?style=for-the-badge&logo=laravel&logoColor=white)](https://laravel.com)
-[![PHP](https://img.shields.io/badge/PHP-8.2%2B-777BB4?style=for-the-badge&logo=php&logoColor=white)](https://php.net)
-[![React](https://img.shields.io/badge/React-19.x-61DAFB?style=for-the-badge&logo=react&logoColor=black)](https://react.dev)
-[![Vite](https://img.shields.io/badge/Vite-7.x-646CFF?style=for-the-badge&logo=vite&logoColor=white)](https://vitejs.dev)
-[![Tailwind CSS](https://img.shields.io/badge/Tailwind_CSS-v4.0-06B6D4?style=for-the-badge&logo=tailwindcss&logoColor=white)](https://tailwindcss.com)
+[![Laravel](https://img.shields.io/badge/Laravel-v12.69.3-FF2D20?style=for-the-badge&logo=laravel&logoColor=white)](https://laravel.com)
+[![PHP](https://img.shields.io/badge/PHP-8.4.27_(Herd)_%7C_%5E8.2-777BB4?style=for-the-badge&logo=php&logoColor=white)](https://php.net)
+[![Composer](https://img.shields.io/badge/Composer-2.10.2-885630?style=for-the-badge&logo=composer&logoColor=white)](https://getcomposer.org)
+[![React](https://img.shields.io/badge/React-19.3.0-61DAFB?style=for-the-badge&logo=react&logoColor=black)](https://react.dev)
+[![Vite](https://img.shields.io/badge/Vite-7.3.7-646CFF?style=for-the-badge&logo=vite&logoColor=white)](https://vitejs.dev)
+[![Tailwind CSS](https://img.shields.io/badge/Tailwind_CSS-v4.3.3-06B6D4?style=for-the-badge&logo=tailwindcss&logoColor=white)](https://tailwindcss.com)
 [![Tests](https://img.shields.io/badge/Tests-64%20Passed%20(340%20Assertions)-success?style=for-the-badge&logo=phpunit&logoColor=white)](https://phpunit.de)
 
 **Qurais Kitchen POS** adalah sistem aplikasi kasir (*Point of Sale*) modern, **Qurais Kitchen Dashboard** terpadu untuk Superadmin, *Kitchen Display System* (KDS) *real-time*, dan mesin cetak printer thermal (*ESC/POS engine*) yang dirancang khusus untuk restoran, kafe, dan bisnis kuliner berkecepatan tinggi.
@@ -55,12 +56,14 @@ Aplikasi ini menyinkronkan alur operasional bisnis secara utuh: mulai dari penge
 
 ---
 
-### 4. 🖨️ Mesin Struk ESC/POS & Hardware Thermal Printer
-* **Generasi Binary ESC/POS Asli**: Didukung oleh `EscPosReceiptService` yang menghasilkan *byte command* standar ESC/POS (alignment, bold, table layout, line feed, cut paper, dan pulse laci kasir).
-* **Direct Hardware Spooler Printing**: Mendukung cetak otomatis langsung ke driver printer Windows (seperti *Putian POS Thermal 2*, *XP-58*, *POS-80*, *Epson TM Series*) tanpa dialog cetak browser.
-* **Web Serial USB Printing**: Dukungan alternatif pengiriman stream binary langsung ke printer thermal USB via Chrome Web Serial API.
+### 4. 🖨️ Mesin Struk ESC/POS & Hardware Thermal Printer Multi-OS
+* **Generasi Binary ESC/POS Presisi**: Didukung oleh `EscPosReceiptService` yang menghasilkan *byte command* standar ESC/POS dengan *software word-wrapping* (`wrapLine()` & `centerText()`), perataan 2 kolom otomatis, pemotongan kertas (*auto-cutter*), *paper feed* margin bawah, dan *pulse* laci kasir.
+* **Multi-OS Direct Hardware Spooler Printing (Windows, macOS Ventura, Linux)**:
+  * **Windows**: Cetak otomatis langsung ke Windows Print Spooler (`winspool.Drv` RAW via `scripts/raw_print.ps1`).
+  * **macOS & Linux**: Mendukung **CUPS Raw Queue** (`lp -d <printer> -o raw` & `lpr -o raw`), auto-registrasi printer USB via `lpinfo -v` / `lpadmin`, serta penulisan langsung ke *device node* USB (`/dev/cu.usb*`, `/dev/tty.usb*`, `/dev/usb/lp*`).
+* **Universal Browser USB Printing (WebUSB & Web Serial API)**: Dukungan pengiriman stream binary ESC/POS langsung lewat kabel USB dari browser (Google Chrome / Edge / Brave) menggunakan **WebUSB API** (`navigator.usb` pada interface USB Printer Class `0x07` dengan *64-byte packet pacing*) dan fallback **Web Serial API** (`navigator.serial`) tanpa memerlukan driver OS.
 * **Sistem Pencatatan Latency Cetak**: Mengukur dan mencatat secara presisi waktu (*latency*) dari saat order dibuat (`created_at`) hingga struk tercetak ke mesin printer, disimpan ke database (`receipt_print_logs`) dan dicatat ke log Laravel.
-* **Dukungan Ukuran Kertas Fleksibel**: Kompatibel dengan ukuran standar **58mm (32 kolom)** dan **80mm (48 kolom)**.
+* **Dukungan Ukuran Kertas Fleksibel**: Kompatibel dengan ukuran standar **58mm (32 kolom)** dan **80mm (48 kolom)** tanpa pemotongan kata di tengah baris.
 * **Ekspor & Download Binary**: Opsi salin teks plain dan download file mentah `.bin` untuk keperluan arsip atau debugging socket TCP/USB.
 
 ---
@@ -99,22 +102,53 @@ Sistem menyediakan **3 portal login terpisah** dengan isolasi peran menggunakan 
 
 ---
 
-## 🛠️ Tech Stack & Arsitektur
+## 🛠️ Tech Stack & Arsitektur (Versi Aktif)
 
-* **Backend**:
-  * [Laravel 12](https://laravel.com) (PHP 8.2+)
-  * [Spatie Laravel Permission](https://spatie.be/docs/laravel-permission) v6.25 (RBAC Bertingkat)
-  * [opcodesio/log-viewer](https://github.com/opcodesio/log-viewer) (Laravel Log Viewer UI)
-  * SQLite / MySQL Database Engine
-  * Native Server-Sent Events (SSE) Stream Controller
-* **Frontend**:
-  * [React 19](https://react.dev)
-  * [Vite 7](https://vitejs.dev)
-  * [Tailwind CSS v4](https://tailwindcss.com)
-  * [Lucide React](https://lucide.dev) & [Canvas Confetti](https://www.npmjs.com/package/canvas-confetti)
-* **Printer Service**:
-  * Custom `EscPosReceiptService` (ESC/POS binary builder & plain-text receipt engine bertemakan Qurais Kitchen)
-  * Windows Print Spooler Integration via PowerShell command
+### 1. Runtime & Environment Server Aktif
+| Komponen | Versi Aktif (Terinstal) | Spesifikasi / Keterangan |
+| :--- | :--- | :--- |
+| **PHP Runtime** | **`8.4.27`** (`^8.2` di `composer.json`) | CLI NTS (`clang 17.0.0`), Built by **Laravel Herd**, Zend Engine `v4.4.27`, Zend OPcache `v8.4.27` |
+| **Composer** | **`2.10.2`** | Dependency Manager PHP (`/Users/macventura/Library/Application Support/Herd/bin/composer`) |
+| **Node.js (Herd NVM)** | **`v22.23.4`** (`v20.20.2` tersedia) | JavaScript Runtime untuk kompilasi aset Vite & React |
+| **Local Web Server** | **Laravel Herd** / Artisan Serve | Mendukung domain `.test` otomatis di macOS Ventura & Windows |
+| **Database Engine** | **SQLite 3** (`database.sqlite`) | Kompatibel penuh dengan MySQL 8.0 / MariaDB |
+
+### 2. Backend Stack & Paket Composer (`composer.json` & `composer.lock`)
+| Paket Composer | Constraint `composer.json` | Versi Aktif (`composer.lock`) | Fungsi Utama |
+| :--- | :--- | :--- | :--- |
+| [`laravel/framework`](https://laravel.com) | `^12.0` | **`v12.69.3`** | Core Framework Backend, Routing, Eloquent ORM, SSE Stream, Events |
+| [`spatie/laravel-permission`](https://spatie.be/docs/laravel-permission) | `^6.25` | **`6.25.0`** | Role-Based Access Control (RBAC: `superadmin`, `cashier`, `kitchen`) |
+| [`opcodesio/log-viewer`](https://github.com/opcodesio/log-viewer) | `^3.24` | **`v3.24.2`** | Antarmuka Web Monitoring Log Terkategori (`/log-viewer`) |
+| [`laravel/tinker`](https://github.com/laravel/tinker) | `^2.10.1` | **`v2.11.1`** | REPL Interaktif untuk inspeksi model & database Laravel |
+| `phpunit/phpunit` *(dev)* | `^11.5.50` | **`11.5.57`** | Automated Unit & Feature Testing Suite (64 Tests / 340 Assertions) |
+| `laravel/pint` *(dev)* | `^1.24` | **`v1.30.4`** | Opinionated PHP Code Style Fixer |
+| `laravel/pail` *(dev)* | `^1.2.2` | **`v1.2.7`** | Real-time CLI Log Tailer |
+| `laravel/sail` *(dev)* | `^1.41` | **`v1.68.0`** | Docker Development Environment |
+| `nunomaduro/collision` *(dev)* | `^8.6` | **`v8.9.5`** | CLI Error Handler & Reporting untuk PHPUnit / Artisan |
+| `mockery/mockery` *(dev)* | `^1.6` | **`1.6.15`** | Mocking Framework untuk pengujian unit |
+| `fakerphp/faker` *(dev)* | `^1.23` | **`v1.24.1`** | Generator data sampel pada Database Seeder & Factory |
+
+### 3. Frontend Stack & Paket NPM (`package.json` & `package-lock.json`)
+| Paket NPM | Constraint `package.json` | Versi Aktif (`package-lock.json`) | Fungsi Utama |
+| :--- | :--- | :--- | :--- |
+| [`react`](https://react.dev) & `react-dom` | `^19.3.0` | **`19.3.0`** | UI Library Interaktif (POS, KDS Realtime, CMS, Analytics, Modals) |
+| [`vite`](https://vitejs.dev) | `^7.0.7` | **`7.3.7`** | Next-Generation Frontend Bundler & HMR |
+| [`tailwindcss`](https://tailwindcss.com) & `@tailwindcss/vite` | `^4.0.0` | **`4.3.3`** | Utility-first CSS Framework v4 dengan tema Dark Glassmorphism |
+| `laravel-vite-plugin` | `^2.0.0` | **`2.1.0`** | Integrasi pipeline aset Vite dengan Blade Laravel |
+| `@vitejs/plugin-react` | `^5.2.0` | **`5.2.0`** | Fast Refresh & JSX Compiler untuk React 19 |
+| `axios` | `^1.11.0` | **`1.20.0`** | HTTP Client komunikasi asinkron ke endpoint API Laravel |
+| `lucide-react` | `^1.52.0` | **`1.52.0`** | Koleksi ikon vektor modern |
+| `canvas-confetti` | `^1.9.4` | **`1.9.4`** | Animasi selebrasi visual saat transaksi kasir berhasil |
+| `concurrently` | `^9.0.1` | **`9.2.4`** | Menjalankan server PHP, Queue Worker, dan Vite secara paralel |
+
+### 4. Arsitektur Layanan Printer Thermal Multi-OS
+* **`EscPosReceiptService`**: Engine generator byte biner ESC/POS & teks plain 58mm (32 kolom) dan 80mm (48 kolom) dengan pembungkusan kata otomatis (*word-wrap* `wrapLine()` & `centerText()`), *double-height header*, pemotong kertas (`GS V`), *paper feed* margin sobekan, serta *cash drawer kick* (`ESC p`).
+* **Multi-OS Backend Spooler**:
+  * **Windows**: PowerShell Raw Spooler (`winspool.Drv` via `scripts/raw_print.ps1`).
+  * **macOS Ventura & Linux**: CUPS Raw Queue (`lp -d <printer> -o raw` & `lpr -o raw`), auto-registrasi printer USB via `lpinfo -v` / `lpadmin`, serta penulisan langsung ke port device (`/dev/cu.usb*`, `/dev/tty.usb*`, `/dev/usb/lp*`).
+* **Universal Browser USB Printing (`thermalPrinter.js`)**:
+  * **WebUSB API (`navigator.usb`)**: Koneksi langsung ke endpoint Bulk OUT USB Printer Class (`0x07`) dengan *64-byte chunk pacing* (mencegah *buffer overflow* pada printer thermal 58mm/80mm di macOS, Windows, Linux, ChromeOS, dan Android).
+  * **Web Serial API (`navigator.serial`)**: Fallback otomatis untuk printer thermal berbasis chip USB-to-Serial (CH340/PL2303).
 
 ---
 
