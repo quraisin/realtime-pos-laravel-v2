@@ -76,17 +76,17 @@ export default function ThermalReceiptModal({ isOpen, onClose, receiptData, orde
         };
 
         const lines = [];
-        lines.push(center('Qurais Kitchen'));
+        lines.push(center('QURAIS KITCHEN'));
         lines.push(center('Cita Rasa Istimewa Setiap Saat'));
         lines.push(center('Jl. Boulevard Raya No. 88,'));
         lines.push(center('Jakarta Selatan'));
         lines.push(center('Telp: 0812-3456-7890'));
         lines.push('='.repeat(width));
-        lines.push(`No: ${order.order_number || 'TRX'}`);
+        const orderTypeStr = (order.order_type || 'dine_in').replace('_', ' ').toUpperCase();
+        lines.push(pad(`No: ${order.order_number || 'TRX'}`, orderTypeStr));
         const dateStr = order.created_at ? new Date(order.created_at).toLocaleDateString('id-ID') : new Date().toLocaleDateString('id-ID');
-        lines.push(pad(dateStr, `Tipe: ${(order.order_type || 'dine_in').toUpperCase()}`));
+        lines.push(pad(`Tgl: ${dateStr}`, order.table_number ? `Meja: ${order.table_number}` : ''));
         lines.push(`Kasir: ${order.cashier?.name || 'Qurais Kitchen'}`);
-        if (order.table_number) lines.push(`Meja / Lokasi: ${order.table_number}`);
         lines.push(`Pelanggan: ${order.customer_name || 'Pelanggan Umum'}`);
         lines.push('-'.repeat(width));
         lines.push(pad('Item / Qty x Harga', 'Subtotal'));
@@ -99,7 +99,7 @@ export default function ThermalReceiptModal({ isOpen, onClose, receiptData, orde
                 const q = Number(it.quantity || 1);
                 const p = Number(it.price || it.product?.price || 0);
                 const s = Number(it.subtotal || (p * q));
-                lines.push(pad(` ${q} x ${p.toLocaleString('id-ID')}`, s.toLocaleString('id-ID')));
+                lines.push(pad(`  ${q} x ${p.toLocaleString('id-ID')}`, s.toLocaleString('id-ID')));
                 if (it.notes) lines.push(`   * ${it.notes}`);
             });
         }
@@ -113,6 +113,7 @@ export default function ThermalReceiptModal({ isOpen, onClose, receiptData, orde
         }
         lines.push('='.repeat(width));
         lines.push(pad('TOTAL', `Rp ${Number(order.total_amount || 0).toLocaleString('id-ID')}`));
+        lines.push('-'.repeat(width));
         lines.push(pad('Metode Bayar', (order.payment_method || 'CASH').toUpperCase()));
         if (order.payment_method === 'cash') {
             lines.push(pad('Tunai', `Rp ${Number(order.cash_tendered || order.total_amount).toLocaleString('id-ID')}`));
@@ -129,7 +130,7 @@ export default function ThermalReceiptModal({ isOpen, onClose, receiptData, orde
         lines.push(center('Barang yang dibeli tidak dapat'));
         lines.push(center('ditukar.'));
         lines.push(center('Simpan struk ini sebagai bukti.'));
-        lines.push(center('POS System Powered by Qurais Kitchen'));
+        lines.push(center('Powered by Qurais Kitchen POS'));
         return lines.join('\n');
     };
 
@@ -158,13 +159,20 @@ export default function ThermalReceiptModal({ isOpen, onClose, receiptData, orde
                 const latency = res.data.latency_ms ? ` (⏱️ Latency: ${res.data.latency_ms} ms)` : '';
                 setSerialStatus((res.data.message || 'Tiket berhasil dicetak di printer thermal!') + latency);
                 setTimeout(() => setSerialStatus(''), 4500);
+            } else if (escposBase64 && ('usb' in navigator || 'serial' in navigator)) {
+                setSerialStatus('Spooler OS belum siap, mengalihkan ke koneksi langsung Kabel USB (WebUSB/Serial)...');
+                await handlePrintWebSerial();
             } else {
                 setSerialStatus('Gagal: ' + res.data.message);
                 setTimeout(() => setSerialStatus(''), 5000);
             }
         } catch (err) {
-            setSerialStatus('Gagal cetak: ' + (err.response?.data?.message || err.message));
-            setTimeout(() => setSerialStatus(''), 5000);
+            if (escposBase64 && ('usb' in navigator || 'serial' in navigator)) {
+                await handlePrintWebSerial();
+            } else {
+                setSerialStatus('Gagal cetak: ' + (err.response?.data?.message || err.message));
+                setTimeout(() => setSerialStatus(''), 5000);
+            }
         }
     };
 
@@ -177,17 +185,17 @@ export default function ThermalReceiptModal({ isOpen, onClose, receiptData, orde
     const handlePrintWebSerial = async () => {
         if (!escposBase64) return;
         const tStart = performance.now();
-        setSerialStatus('Menghubungkan ke printer USB...');
+        setSerialStatus('Menghubungkan langsung ke printer via Kabel USB...');
         try {
             const res = await printDirectWebSerial(escposBase64);
             const duration = Math.round(performance.now() - tStart);
             if (orderId) {
                 // Record print latency to backend database & Laravel log
                 axios.post(`/api/printer/record-print-latency/${orderId}`, {
-                    method: 'web_serial',
+                    method: res.method || 'web_usb',
                     duration_ms: duration,
                     success: true,
-                    printer: 'USB Web Serial Thermal'
+                    printer: res.printer || 'USB Thermal Printer'
                 }).then(latRes => {
                     const lat = latRes.data.latency_ms ? ` (⏱️ Latency: ${latRes.data.latency_ms} ms)` : '';
                     setSerialStatus(res.message + lat);
@@ -199,7 +207,7 @@ export default function ThermalReceiptModal({ isOpen, onClose, receiptData, orde
             }
             setTimeout(() => setSerialStatus(''), 4500);
         } catch (err) {
-            setSerialStatus('Gagal: ' + (err.message || 'Perangkat tidak ditemukan'));
+            setSerialStatus('Gagal USB: ' + (err.message || 'Perangkat USB tidak ditemukan'));
             setTimeout(() => setSerialStatus(''), 5000);
         }
     };
@@ -314,9 +322,9 @@ export default function ThermalReceiptModal({ isOpen, onClose, receiptData, orde
                             </div>
 
                             <div className="p-3 rounded-xl bg-slate-950/70 border border-slate-800 text-xs text-slate-400 space-y-1">
-                                <p className="font-semibold text-white">Instruksi Mesin Thermal Printer Putian POS:</p>
-                                <p>• <strong>Cetak Putian POS:</strong> Kirim byte ESC/POS langsung ke port hardware spooler Windows (USB002).</p>
-                                <p>• <strong>Direct USB:</strong> Gunakan Web Serial API langsung dari browser.</p>
+                                <p className="font-semibold text-white">Instruksi Mesin Thermal Printer Multi-OS (Windows, macOS, Linux):</p>
+                                <p>• <strong>Cetak Spooler OS:</strong> Kirim byte ESC/POS langsung ke spooler Windows (PowerShell) atau macOS/Linux (CUPS Raw Queue).</p>
+                                <p>• <strong>Kabel USB Langsung:</strong> Gunakan WebUSB / Web Serial API langsung dari browser tanpa driver OS.</p>
                             </div>
                         </div>
                     )}
@@ -343,9 +351,17 @@ export default function ThermalReceiptModal({ isOpen, onClose, receiptData, orde
                     <div className="flex items-center gap-2">
                         <button
                             type="button"
+                            onClick={handlePrintWebSerial}
+                            className="px-3 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold transition-all shadow-lg shadow-indigo-950/50 flex items-center gap-1.5"
+                            title="Cetak langsung lewat Kabel USB (WebUSB / Web Serial - Semua OS)">
+                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+                            USB Langsung
+                        </button>
+                        <button
+                            type="button"
                             onClick={handleDirectHardwarePrint}
                             className="px-3.5 py-2 rounded-xl bg-orange-600 hover:bg-orange-500 text-white text-xs font-bold transition-all shadow-lg shadow-orange-950/50 flex items-center gap-1.5"
-                            title="Kirim cetak langsung ke printer Putian POS via spooler">
+                            title="Kirim cetak langsung ke printer Putian POS via spooler (Windows / macOS CUPS / Linux)">
                             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"/></svg>
                             {isKitchenType ? 'Cetak Tiket ke Printer' : 'Cetak Putian POS'}
                         </button>

@@ -170,6 +170,7 @@ class ThermalPrinterController extends Controller
             'message' => $result['message'],
             'printer' => $result['printer'],
             'order_number' => $order->order_number,
+            'escpos_base64' => base64_encode($rawBytes),
             'latency_ms' => $printLog->latency_ms,
             'duration_ms' => $durationMs,
             'printed_at' => $printLog->printed_at?->toIso8601String(),
@@ -223,6 +224,7 @@ class ThermalPrinterController extends Controller
             'item_id' => $item->id,
             'item_name' => $item->product_name,
             'order_number' => $item->order?->order_number,
+            'escpos_base64' => base64_encode($rawBytes),
             'duration_ms' => $durationMs,
         ]);
     }
@@ -350,27 +352,23 @@ class ThermalPrinterController extends Controller
         $width = EscPosReceiptService::getMaxWidth($settings->paper_size);
 
         $out = EscPosReceiptService::CMD_INIT;
-        $out .= EscPosReceiptService::CMD_ALIGN_CENTER;
+        $out .= EscPosReceiptService::CMD_ALIGN_LEFT;
         $out .= EscPosReceiptService::CMD_BOLD_ON;
-        $out .= EscPosReceiptService::CMD_TEXT_DOUBLE;
-        $out .= 'TEST PRINTER POS' . EscPosReceiptService::LF;
+        $out .= EscPosReceiptService::CMD_TEXT_BIG_H;
+        $out .= $this->escPosService->centerText('TEST PRINTER POS', $width) . EscPosReceiptService::LF;
         $out .= EscPosReceiptService::CMD_TEXT_NORMAL;
         $out .= EscPosReceiptService::CMD_BOLD_OFF;
-        $out .= 'Format: ' . $settings->paper_size . ' (' . $width . ' Kolom)' . EscPosReceiptService::LF;
-        $out .= 'Printer: ' . ($settings->windows_printer_name ?: 'Putian POS Thermal 2') . EscPosReceiptService::LF;
-        $out .= date('d/m/Y H:i:s') . EscPosReceiptService::LF;
+        $out .= $this->escPosService->centerText('Format: ' . $settings->paper_size . ' (' . $width . ' Kolom)', $width) . EscPosReceiptService::LF;
+        $out .= $this->escPosService->centerText('Printer: ' . ($settings->windows_printer_name ?: 'USB Thermal'), $width) . EscPosReceiptService::LF;
+        $out .= $this->escPosService->centerText(date('d/m/Y H:i:s'), $width) . EscPosReceiptService::LF;
         $out .= str_repeat('=', $width) . EscPosReceiptService::LF;
-        $out .= EscPosReceiptService::CMD_ALIGN_LEFT;
-        $out .= 'Perataan Kiri    [OK]' . EscPosReceiptService::LF;
-        $out .= EscPosReceiptService::CMD_ALIGN_CENTER;
-        $out .= 'Perataan Tengah  [OK]' . EscPosReceiptService::LF;
-        $out .= EscPosReceiptService::CMD_ALIGN_RIGHT;
-        $out .= 'Perataan Kanan   [OK]' . EscPosReceiptService::LF;
-        $out .= EscPosReceiptService::CMD_ALIGN_CENTER;
+        $out .= $this->escPosService->formatTwoColumns('Perataan Kiri', '[OK]', $width) . EscPosReceiptService::LF;
+        $out .= $this->escPosService->centerText('Perataan Tengah [OK]', $width) . EscPosReceiptService::LF;
         $out .= str_repeat('-', $width) . EscPosReceiptService::LF;
-        $out .= 'Karakter: 0123456789 ABCDEF' . EscPosReceiptService::LF;
-        $out .= 'Thermal Head: Normal & Siap' . EscPosReceiptService::LF;
+        $out .= $this->escPosService->centerText('Karakter: 0123456789 ABCDEF', $width) . EscPosReceiptService::LF;
+        $out .= $this->escPosService->centerText('Thermal Head: Normal & Siap', $width) . EscPosReceiptService::LF;
         $out .= str_repeat('=', $width) . EscPosReceiptService::LF;
+        $out .= str_repeat(EscPosReceiptService::LF, 4);
 
         if ($settings->cut_paper && strtolower($settings->paper_size) === '80mm') {
             $out .= EscPosReceiptService::CMD_CUT_PAPER;

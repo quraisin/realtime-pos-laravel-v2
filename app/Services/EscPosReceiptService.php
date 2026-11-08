@@ -38,30 +38,146 @@ class EscPosReceiptService
     }
 
     /**
-     * Get list of installed Windows printers
+     * Get list of installed printers across all OS (Windows, macOS, Linux)
      */
     public function getInstalledWindowsPrinters(): array
     {
-        if (strtoupper(substr(PHP_OS, 0, 3)) !== 'WIN') {
-            return [];
+        $os = strtoupper(substr(PHP_OS, 0, 3));
+
+        // 1. Windows (PowerShell Spooler)
+        if ($os === 'WIN') {
+            try {
+                $cmd = 'powershell -NoProfile -Command "Get-Printer | Select-Object -ExpandProperty Name"';
+                $output = shell_exec($cmd);
+                if ($output) {
+                    $lines = array_map('trim', explode("\n", $output));
+                    $printers = array_values(array_filter($lines, fn($line) => !empty($line)));
+                    if (!empty($printers)) {
+                        return $printers;
+                    }
+                }
+            } catch (\Throwable $e) {
+                // fallback
+            }
+
+            return ['Putian POS Thermal 2'];
         }
 
+        // 2. macOS (Darwin) & Linux (CUPS + Direct USB/Serial devices)
+        $printers = [];
+
+        // 2a. Check CUPS queues via lpstat -e and lpstat -a
         try {
-            $cmd = 'powershell -NoProfile -Command "Get-Printer | Select-Object -ExpandProperty Name"';
-            $output = shell_exec($cmd);
-            if ($output) {
-                $lines = array_map('trim', explode("\n", $output));
-                return array_values(array_filter($lines, fn($line) => !empty($line)));
+            $lpstatOut = shell_exec('/usr/bin/lpstat -e 2>/dev/null || lpstat -e 2>/dev/null');
+            if ($lpstatOut) {
+                foreach (explode("\n", trim($lpstatOut)) as $line) {
+                    $name = trim($line);
+                    if ($name !== '' && !in_array($name, $printers, true)) {
+                        $printers[] = $name;
+                    }
+                }
+            }
+
+            if (empty($printers)) {
+                $lpstatA = shell_exec('/usr/bin/lpstat -a 2>/dev/null || lpstat -a 2>/dev/null');
+                if ($lpstatA) {
+                    foreach (explode("\n", trim($lpstatA)) as $line) {
+                        if (preg_match('/^([^\s]+)\s+accepting/i', trim($line), $m)) {
+                            if (!in_array($m[1], $printers, true)) {
+                                $printers[] = $m[1];
+                            }
+                        }
+                    }
+                }
             }
         } catch (\Throwable $e) {
-            // fallback
+            // ignore
         }
 
-        return ['Putian POS Thermal 2'];
+        // 2b. Check connected USB printers via lpinfo -v (auto-register raw queue if needed)
+        try {
+            $lpinfoOut = shell_exec('/usr/sbin/lpinfo -v 2>/dev/null || lpinfo -v 2>/dev/null');
+            if ($lpinfoOut) {
+                foreach (explode("\n", trim($lpinfoOut)) as $line) {
+                    if (preg_match('/(usb:\/\/[^\s]+)/i', trim($line), $m)) {
+                        $usbUri = $m[1];
+                        $queueName = $this->resolveOrRegisterUsbCupsQueue($usbUri, $printers);
+                        if ($queueName && !in_array($queueName, $printers, true)) {
+                            $printers[] = $queueName;
+                        }
+                    }
+                }
+            }
+        } catch (\Throwable $e) {
+            // ignore
+        }
+
+        // 2c. Check direct USB/Serial device nodes on macOS & Linux
+        $devicePatterns = [
+            '/dev/cu.usb*',
+            '/dev/tty.usb*',
+            '/dev/usb/lp*',
+            '/dev/ttyUSB*',
+            '/dev/ttyACM*',
+        ];
+        foreach ($devicePatterns as $pattern) {
+            $matches = glob($pattern) ?: [];
+            foreach ($matches as $dev) {
+                if (!in_array($dev, $printers, true)) {
+                    $printers[] = $dev;
+                }
+            }
+        }
+
+        if (empty($printers)) {
+            $printers[] = 'Putian_POS_Thermal';
+        }
+
+        return $printers;
     }
 
     /**
-     * Send raw ESC/POS bytes directly to Windows Thermal Printer
+     * Resolve an existing CUPS queue for a usb:// URI or auto-register a Raw CUPS queue
+     */
+    protected function resolveOrRegisterUsbCupsQueue(string $usbUri, array $existingQueues = []): ?string
+    {
+        try {
+            $lpstatV = shell_exec('/usr/bin/lpstat -v 2>/dev/null || lpstat -v 2>/dev/null');
+            if ($lpstatV) {
+                foreach (explode("\n", trim($lpstatV)) as $line) {
+                    // Format: device for <QueueName>: <URI>
+                    if (preg_match('/device for ([^\s:]+):\s*(.+)$/i', trim($line), $m)) {
+                        if (trim($m[2]) === $usbUri) {
+                            return trim($m[1]);
+                        }
+                    }
+                }
+            }
+
+            // Build a clean CUPS queue name from the USB URI
+            $parsed = parse_url($usbUri);
+            $make = preg_replace('/[^A-Za-z0-9_]/', '_', $parsed['host'] ?? 'USB');
+            $model = preg_replace('/[^A-Za-z0-9_]/', '_', trim($parsed['path'] ?? 'Thermal_Printer', '/'));
+            $queueName = trim("{$make}_{$model}", '_') ?: 'Putian_POS_Thermal';
+
+            // Auto-register raw queue in CUPS
+            $cmd = sprintf(
+                '(/usr/sbin/lpadmin -p %s -E -v %s -m raw 2>/dev/null || lpadmin -p %s -E -v %s -m raw 2>/dev/null)',
+                escapeshellarg($queueName),
+                escapeshellarg($usbUri),
+                escapeshellarg($queueName),
+                escapeshellarg($usbUri)
+            );
+            shell_exec($cmd);
+
+            return $queueName;
+        } catch (\Throwable $e) {
+            return null;
+        }
+    }
+
+    /**
+     * Send raw ESC/POS bytes directly to Thermal Printer across Windows, macOS, and Linux
      */
     public function printDirectToWindowsPrinter(string $rawBytes, ?string $printerName = null): array
     {
@@ -74,27 +190,120 @@ class EscPosReceiptService
         }
         file_put_contents($tempFile, $rawBytes);
 
-        $scriptPath = base_path('scripts/raw_print.ps1');
+        $os = strtoupper(substr(PHP_OS, 0, 3));
 
+        // 1. Windows OS: Use PowerShell Raw Print Spooler script
+        if ($os === 'WIN') {
+            $scriptPath = base_path('scripts/raw_print.ps1');
+
+            $cmd = sprintf(
+                'powershell -NoProfile -ExecutionPolicy Bypass -File %s -FilePath %s -PrinterName %s 2>&1',
+                escapeshellarg($scriptPath),
+                escapeshellarg($tempFile),
+                escapeshellarg($targetPrinter)
+            );
+
+            $output = shell_exec($cmd);
+            @unlink($tempFile);
+
+            $isSuccess = str_contains((string)$output, 'SUCCESS');
+
+            return [
+                'success' => $isSuccess,
+                'printer' => $targetPrinter,
+                'output' => trim((string)$output),
+                'message' => $isSuccess
+                    ? "Struk berhasil dicetak ke mesin printer: {$targetPrinter}"
+                    : "Gagal mencetak ke {$targetPrinter}: {$output}",
+            ];
+        }
+
+        // 2. macOS (Darwin) & Linux: Support Direct Device Node (/dev/...) or CUPS Raw Spooler (lp / lpr)
+        // 2a. If targetPrinter is a direct /dev/ node
+        if (str_starts_with($targetPrinter, '/dev/')) {
+            try {
+                if (file_exists($targetPrinter) && is_writable($targetPrinter)) {
+                    $written = @file_put_contents($targetPrinter, $rawBytes);
+                    @unlink($tempFile);
+                    if ($written !== false) {
+                        return [
+                            'success' => true,
+                            'printer' => $targetPrinter,
+                            'output' => "Wrote {$written} bytes to {$targetPrinter}",
+                            'message' => "Struk berhasil dikirim ke port USB: {$targetPrinter}",
+                        ];
+                    }
+                }
+            } catch (\Throwable $e) {
+                // fallback to CUPS below
+            }
+        }
+
+        // 2b. Resolve CUPS queue name on macOS / Linux
+        $installedPrinters = $this->getInstalledWindowsPrinters();
+        $cupsTargets = array_values(array_filter($installedPrinters, fn($p) => !str_starts_with($p, '/dev/')));
+
+        $resolvedQueue = $targetPrinter;
+        $sanitizedTarget = preg_replace('/[^A-Za-z0-9_-]/', '_', $targetPrinter);
+
+        if (!in_array($resolvedQueue, $cupsTargets, true)) {
+            if (in_array($sanitizedTarget, $cupsTargets, true)) {
+                $resolvedQueue = $sanitizedTarget;
+            } elseif (!empty($cupsTargets)) {
+                // Prefer any queue matching POS / Thermal / Putian / USB, otherwise first available CUPS printer
+                $matched = null;
+                foreach ($cupsTargets as $candidate) {
+                    if (preg_match('/(pos|thermal|putian|xprinter|eppos|receipt|usb|raw)/i', $candidate)) {
+                        $matched = $candidate;
+                        break;
+                    }
+                }
+                $resolvedQueue = $matched ?: $cupsTargets[0];
+            } else {
+                $resolvedQueue = $sanitizedTarget;
+            }
+        }
+
+        // Try printing via CUPS `lp -d <queue> -o raw`
         $cmd = sprintf(
-            'powershell -NoProfile -ExecutionPolicy Bypass -File %s -FilePath %s -PrinterName %s 2>&1',
-            escapeshellarg($scriptPath),
+            '(/usr/bin/lp -d %s -o raw %s 2>&1 || lp -d %s -o raw %s 2>&1)',
+            escapeshellarg($resolvedQueue),
             escapeshellarg($tempFile),
-            escapeshellarg($targetPrinter)
+            escapeshellarg($resolvedQueue),
+            escapeshellarg($tempFile)
         );
 
-        $output = shell_exec($cmd);
-        @unlink($tempFile);
+        $output = (string) shell_exec($cmd);
+        $isSuccess = str_contains($output, 'request id is') || (trim($output) === '' && !str_contains(strtolower($output), 'error'));
 
-        $isSuccess = str_contains((string)$output, 'SUCCESS');
+        // Fallback: try `lpr -P <queue> -o raw` if `lp` failed
+        if (!$isSuccess || str_contains(strtolower($output), 'lp:') || str_contains(strtolower($output), 'error')) {
+            $lprCmd = sprintf(
+                '(/usr/bin/lpr -P %s -o raw %s 2>&1 || lpr -P %s -o raw %s 2>&1)',
+                escapeshellarg($resolvedQueue),
+                escapeshellarg($tempFile),
+                escapeshellarg($resolvedQueue),
+                escapeshellarg($tempFile)
+            );
+            $lprOut = (string) shell_exec($lprCmd);
+            if (trim($lprOut) === '') {
+                $isSuccess = true;
+                $output = "Printed via lpr raw queue ({$resolvedQueue})";
+            } else {
+                $isSuccess = false;
+                $output = trim($output . ' | ' . $lprOut);
+            }
+        }
+
+        @unlink($tempFile);
 
         return [
             'success' => $isSuccess,
-            'printer' => $targetPrinter,
-            'output' => trim((string)$output),
-            'message' => $isSuccess 
-                ? "Struk berhasil dicetak ke mesin printer: {$targetPrinter}" 
-                : "Gagal mencetak ke {$targetPrinter}: {$output}",
+            'printer' => $resolvedQueue,
+            'output' => trim($output),
+            'message' => $isSuccess
+                ? "Struk berhasil dicetak ke printer USB ({$resolvedQueue})"
+                : "Printer belum terdeteksi di CUPS ({$resolvedQueue}). Gunakan tombol 'Cetak USB (Semua OS)' atau daftarkan printer di CUPS: {$output}",
         ];
     }
 
@@ -196,58 +405,68 @@ class EscPosReceiptService
 
         $out = '';
 
-        // Cash drawer kick if enabled
-        if ($settings->open_cash_drawer && $order->payment_method === 'cash') {
-            $out .= self::CMD_DRAWER_KICK;
-        }
-
-        // Initialize printer
+        // Initialize printer & set left alignment as deterministic baseline
+        // (All centering is calculated in software via centerText() with wordwrap so words never split mid-word)
         $out .= self::CMD_INIT;
+        $out .= self::CMD_ALIGN_LEFT;
 
-        // Store Header (Center aligned)
-        $out .= self::CMD_ALIGN_CENTER;
+        // Store Header (Centered with word-wrapping, Double Height Bold title)
+        $storeName = strtoupper(trim((string)($settings->store_name ?: 'QURAIS KITCHEN')));
         $out .= self::CMD_BOLD_ON;
-        $out .= self::CMD_TEXT_DOUBLE;
-        $out .= $settings->store_name . self::LF;
+        $out .= self::CMD_TEXT_BIG_H;
+        $out .= $this->centerText($storeName, $width) . self::LF;
         $out .= self::CMD_TEXT_NORMAL;
         $out .= self::CMD_BOLD_OFF;
 
         if (!empty($settings->store_tagline)) {
-            $out .= $settings->store_tagline . self::LF;
+            $out .= $this->centerText($settings->store_tagline, $width) . self::LF;
         }
-        $out .= $settings->store_address . self::LF;
-        $out .= 'Telp: ' . $settings->store_phone . self::LF;
+        if (!empty($settings->store_address)) {
+            $out .= $this->centerText($settings->store_address, $width) . self::LF;
+        }
+        if (!empty($settings->store_phone)) {
+            $out .= $this->centerText('Telp: ' . $settings->store_phone, $width) . self::LF;
+        }
         $out .= str_repeat('=', $width) . self::LF;
 
-        // Order Meta (Left aligned)
-        $out .= self::CMD_ALIGN_LEFT;
-        $out .= 'No: ' . $order->order_number . self::LF;
-        $out .= $this->formatTwoColumns(date('d/m/Y H:i', strtotime($order->created_at)), 'Tipe: ' . strtoupper(str_replace('_', ' ', $order->order_type)), $width) . self::LF;
-        $out .= 'Kasir: ' . ($order->cashier ? $order->cashier->name : 'Kasir POS') . self::LF;
-        
-        if ($order->table_number) {
-            $out .= 'Meja / Lokasi: ' . $order->table_number . self::LF;
-        }
-        $out .= 'Pelanggan: ' . $order->customer_name . self::LF;
+        // Order Meta (Clean Two-Column & Wrapped Left-Aligned)
+        $createdAt = $order->created_at
+            ? ($order->created_at instanceof \DateTimeInterface
+                ? $order->created_at->format('d/m/Y H:i')
+                : date('d/m/Y H:i', strtotime((string)$order->created_at)))
+            : date('d/m/Y H:i');
+
+        $orderTypeStr = strtoupper(str_replace('_', ' ', (string)$order->order_type));
+        $out .= $this->formatTwoColumns('No: ' . $order->order_number, $orderTypeStr, $width) . self::LF;
+        $out .= $this->formatTwoColumns('Tgl: ' . $createdAt, $order->table_number ? ('Meja: ' . $order->table_number) : '', $width) . self::LF;
+        $out .= $this->wrapLine('Kasir: ' . ($order->cashier ? $order->cashier->name : 'Kasir POS'), $width) . self::LF;
+        $out .= $this->wrapLine('Pelanggan: ' . ($order->customer_name ?: 'Pelanggan Umum'), $width) . self::LF;
         $out .= str_repeat('-', $width) . self::LF;
 
         // Items Header
+        $out .= self::CMD_BOLD_ON;
         $out .= $this->formatItemsHeader($width) . self::LF;
+        $out .= self::CMD_BOLD_OFF;
         $out .= str_repeat('-', $width) . self::LF;
 
         // Items List
         foreach ($order->items as $item) {
             $productName = $item->product_name ?: ($item->product ? $item->product->name : 'Item');
-            $out .= $productName . self::LF;
+            $out .= $this->wrapLine($productName, $width) . self::LF;
+
             $qty = (int)($item->quantity ?? 1);
             $price = (float)($item->price ?? 0);
             $subtotal = (float)($item->subtotal ?? ($price * $qty));
-            $qtyPrice = ' ' . $qty . ' x ' . number_format($price, 0, ',', '.');
+            $qtyPrice = '  ' . $qty . ' x ' . number_format($price, 0, ',', '.');
             $subtotalStr = number_format($subtotal, 0, ',', '.');
             $out .= $this->formatTwoColumns($qtyPrice, $subtotalStr, $width) . self::LF;
 
             if (!empty($item->notes)) {
-                $out .= '   * ' . $item->notes . self::LF;
+                $noteLines = explode("\n", wordwrap(trim((string)$item->notes), max(10, $width - 5), "\n", true));
+                foreach ($noteLines as $idx => $nLine) {
+                    $prefix = ($idx === 0) ? '   * ' : '     ';
+                    $out .= $prefix . $nLine . self::LF;
+                }
             }
         }
 
@@ -255,7 +474,7 @@ class EscPosReceiptService
 
         // Subtotals & Payments
         $out .= $this->formatTwoColumns('Subtotal', 'Rp ' . number_format($order->subtotal, 0, ',', '.'), $width) . self::LF;
-        
+
         if ($order->discount_amount > 0) {
             $out .= $this->formatTwoColumns('Diskon', '-Rp ' . number_format($order->discount_amount, 0, ',', '.'), $width) . self::LF;
         }
@@ -266,10 +485,13 @@ class EscPosReceiptService
 
         $out .= str_repeat('=', $width) . self::LF;
         $out .= self::CMD_BOLD_ON;
+        $out .= self::CMD_TEXT_BIG_H;
         $out .= $this->formatTwoColumns('TOTAL', 'Rp ' . number_format($order->total_amount, 0, ',', '.'), $width) . self::LF;
+        $out .= self::CMD_TEXT_NORMAL;
         $out .= self::CMD_BOLD_OFF;
+        $out .= str_repeat('-', $width) . self::LF;
 
-        $out .= $this->formatTwoColumns('Metode Bayar', strtoupper(str_replace('_', ' ', $order->payment_method)), $width) . self::LF;
+        $out .= $this->formatTwoColumns('Metode Bayar', strtoupper(str_replace('_', ' ', (string)$order->payment_method)), $width) . self::LF;
         if ($order->payment_method === 'cash') {
             $out .= $this->formatTwoColumns('Tunai', 'Rp ' . number_format($order->cash_tendered, 0, ',', '.'), $width) . self::LF;
             $out .= $this->formatTwoColumns('Kembalian', 'Rp ' . number_format($order->change_due, 0, ',', '.'), $width) . self::LF;
@@ -284,23 +506,33 @@ class EscPosReceiptService
 
         if (!empty($order->notes)) {
             $out .= str_repeat('-', $width) . self::LF;
-            $out .= 'CATATAN PESANAN: ' . $order->notes . self::LF;
+            $out .= 'CATATAN PESANAN:' . self::LF;
+            $out .= $this->wrapLine((string)$order->notes, $width) . self::LF;
         }
 
         $out .= str_repeat('=', $width) . self::LF;
 
-        // Footer Message
-        $out .= self::CMD_ALIGN_CENTER;
-        $footerLines = explode("\n", str_replace("\r", '', $settings->receipt_footer));
+        // Footer Message (Word-wrapped & centered cleanly per line so no word is ever split in half)
+        $footerRaw = $settings->receipt_footer ?: "Terima Kasih Atas Kunjungan Anda!\nBarang yang dibeli tidak dapat ditukar.";
+        $footerLines = explode("\n", str_replace("\r", '', $footerRaw));
         foreach ($footerLines as $line) {
-            $out .= trim($line) . self::LF;
+            $trimmed = trim($line);
+            if ($trimmed !== '') {
+                $out .= $this->centerText($trimmed, $width) . self::LF;
+            }
         }
-        $out .= 'Simpan struk ini sebagai bukti.' . self::LF;
-        $out .= 'POS System Powered by Qurais Kitchen' . self::LF;
+        $out .= $this->centerText('Simpan struk ini sebagai bukti.', $width) . self::LF;
+        $out .= $this->centerText('Powered by Qurais Kitchen POS', $width) . self::LF;
+
+        // Feed 4 blank lines so the bottom of the receipt clears the serrated tear bar cleanly
+        $out .= str_repeat(self::LF, 4);
+
+        // Cash drawer kick placed at the end so solenoid current spike does not disrupt header printing
+        if ($settings->open_cash_drawer && $order->payment_method === 'cash') {
+            $out .= self::CMD_DRAWER_KICK;
+        }
 
         // Cut Paper: Only send to 80mm printers with auto-cutter mechanism.
-        // 58mm printers (such as Putian POS-58) use manual serrated tear bars;
-        // sending GS V cut commands triggers their firmware to feed 35-45mm of blank paper.
         if ($settings->cut_paper && strtolower($settings->paper_size) === '80mm') {
             $out .= self::CMD_CUT_PAPER;
         }
@@ -318,24 +550,19 @@ class EscPosReceiptService
 
         $out = '';
         $out .= self::CMD_INIT;
+        $out .= self::CMD_ALIGN_LEFT;
 
         // Big Header
-        $out .= self::CMD_ALIGN_CENTER;
         $out .= self::CMD_BOLD_ON;
-        $out .= self::CMD_TEXT_DOUBLE;
-        $out .= '** TIKET DAPUR **' . self::LF;
-        $out .= self::CMD_TEXT_NORMAL;
-        $out .= self::CMD_BOLD_OFF;
+        $out .= self::CMD_TEXT_BIG_H;
+        $out .= $this->centerText('** TIKET DAPUR **', $width) . self::LF;
 
         // Big Table / Order Target Identifier
-        $out .= self::CMD_BOLD_ON;
-        $out .= self::CMD_TEXT_DOUBLE;
         $target = $order->table_number ? 'MEJA: ' . $order->table_number : 'ORDER: ' . strtoupper(str_replace('_', ' ', (string)$order->order_type));
-        $out .= $target . self::LF;
+        $out .= $this->centerText($target, $width) . self::LF;
         $out .= self::CMD_TEXT_NORMAL;
         $out .= self::CMD_BOLD_OFF;
 
-        $out .= self::CMD_ALIGN_LEFT;
         $createdAt = $order->created_at 
             ? ($order->created_at instanceof \DateTimeInterface 
                 ? $order->created_at->format('H:i d/m/Y') 
@@ -349,19 +576,20 @@ class EscPosReceiptService
         foreach ($order->items as $item) {
             $out .= self::CMD_BOLD_ON;
             $out .= self::CMD_TEXT_BIG_H;
-            $out .= $item->quantity . 'x ' . $item->product_name . self::LF;
+            $out .= $this->wrapLine($item->quantity . 'x ' . $item->product_name, $width) . self::LF;
             $out .= self::CMD_TEXT_NORMAL;
             $out .= self::CMD_BOLD_OFF;
 
             if (!empty($item->notes)) {
                 $out .= self::CMD_BOLD_ON;
-                $out .= '  * CATATAN: ' . strtoupper($item->notes) . self::LF;
+                $out .= $this->wrapLine('  * CATATAN: ' . strtoupper($item->notes), $width) . self::LF;
                 $out .= self::CMD_BOLD_OFF;
             }
             $out .= self::LF;
         }
 
         $out .= str_repeat('=', $width) . self::LF;
+        $out .= str_repeat(self::LF, 4);
 
         if ($settings->cut_paper && strtolower($settings->paper_size) === '80mm') {
             $out .= self::CMD_CUT_PAPER;
@@ -379,12 +607,16 @@ class EscPosReceiptService
         $width = self::getMaxWidth($settings->paper_size);
 
         $lines = [];
-        $lines[] = $this->centerText($settings->store_name, $width);
+        $lines[] = $this->centerText(strtoupper((string)($settings->store_name ?: 'QURAIS KITCHEN')), $width);
         if (!empty($settings->store_tagline)) {
             $lines[] = $this->centerText($settings->store_tagline, $width);
         }
-        $lines[] = $this->centerText($settings->store_address, $width);
-        $lines[] = $this->centerText('Telp: ' . $settings->store_phone, $width);
+        if (!empty($settings->store_address)) {
+            $lines[] = $this->centerText($settings->store_address, $width);
+        }
+        if (!empty($settings->store_phone)) {
+            $lines[] = $this->centerText('Telp: ' . $settings->store_phone, $width);
+        }
         $lines[] = str_repeat('=', $width);
 
         $createdAt = $order->created_at 
@@ -393,14 +625,11 @@ class EscPosReceiptService
                 : date('d/m/Y H:i', strtotime((string)$order->created_at)))
             : date('d/m/Y H:i');
 
-        $lines[] = 'No: ' . $order->order_number;
-        $orderTypeStr = 'Tipe: ' . strtoupper(str_replace('_', ' ', (string)$order->order_type));
-        $lines[] = $this->formatTwoColumns($createdAt, $orderTypeStr, $width);
-        $lines[] = 'Kasir: ' . ($order->cashier ? $order->cashier->name : 'Kasir POS');
-        if (!empty($order->table_number)) {
-            $lines[] = 'Meja / Lokasi: ' . $order->table_number;
-        }
-        $lines[] = 'Pelanggan: ' . ($order->customer_name ?: 'Pelanggan Umum');
+        $orderTypeStr = strtoupper(str_replace('_', ' ', (string)$order->order_type));
+        $lines[] = $this->formatTwoColumns('No: ' . $order->order_number, $orderTypeStr, $width);
+        $lines[] = $this->formatTwoColumns('Tgl: ' . $createdAt, $order->table_number ? ('Meja: ' . $order->table_number) : '', $width);
+        $lines[] = $this->wrapLine('Kasir: ' . ($order->cashier ? $order->cashier->name : 'Kasir POS'), $width);
+        $lines[] = $this->wrapLine('Pelanggan: ' . ($order->customer_name ?: 'Pelanggan Umum'), $width);
         $lines[] = str_repeat('-', $width);
 
         $lines[] = $this->formatItemsHeader($width);
@@ -408,21 +637,18 @@ class EscPosReceiptService
 
         foreach ($order->items as $item) {
             $productName = $item->product_name ?: ($item->product ? $item->product->name : 'Item');
-            $nameLines = explode("\n", wordwrap($productName, $width, "\n", true));
-            foreach ($nameLines as $nLine) {
-                $lines[] = $nLine;
-            }
+            $lines[] = $this->wrapLine($productName, $width);
 
             $qty = (int)($item->quantity ?? 1);
             $price = (float)($item->price ?? 0);
             $subtotal = (float)($item->subtotal ?? ($price * $qty));
 
-            $qtyPrice = ' ' . $qty . ' x ' . number_format($price, 0, ',', '.');
+            $qtyPrice = '  ' . $qty . ' x ' . number_format($price, 0, ',', '.');
             $subtotalStr = number_format($subtotal, 0, ',', '.');
             $lines[] = $this->formatTwoColumns($qtyPrice, $subtotalStr, $width);
 
             if (!empty($item->notes)) {
-                $itemNotesLines = explode("\n", wordwrap($item->notes, max(10, $width - 5), "\n", true));
+                $itemNotesLines = explode("\n", wordwrap(trim((string)$item->notes), max(10, $width - 5), "\n", true));
                 foreach ($itemNotesLines as $idx => $nLine) {
                     $prefix = ($idx === 0) ? '   * ' : '     ';
                     $lines[] = $prefix . $nLine;
@@ -440,6 +666,7 @@ class EscPosReceiptService
         }
         $lines[] = str_repeat('=', $width);
         $lines[] = $this->formatTwoColumns('TOTAL', 'Rp ' . number_format($order->total_amount, 0, ',', '.'), $width);
+        $lines[] = str_repeat('-', $width);
 
         $methodName = strtoupper(str_replace('_', ' ', (string)$order->payment_method));
         $lines[] = $this->formatTwoColumns('Metode Bayar', $methodName, $width);
@@ -460,15 +687,12 @@ class EscPosReceiptService
         if (!empty($order->notes)) {
             $lines[] = str_repeat('-', $width);
             $lines[] = 'CATATAN PESANAN:';
-            $orderNotesLines = explode("\n", wordwrap($order->notes, $width, "\n", true));
-            foreach ($orderNotesLines as $onLine) {
-                $lines[] = $onLine;
-            }
+            $lines[] = $this->wrapLine((string)$order->notes, $width);
         }
 
         $lines[] = str_repeat('=', $width);
 
-        $footerRaw = $settings->receipt_footer ?: "Terima Kasih Atas Kunjungan Anda!\nBarang yang sudah dibeli tidak dapat ditukar.";
+        $footerRaw = $settings->receipt_footer ?: "Terima Kasih Atas Kunjungan Anda!\nBarang yang dibeli tidak dapat ditukar.";
         $footerLines = explode("\n", str_replace("\r", '', $footerRaw));
         foreach ($footerLines as $fLine) {
             $trimmed = trim($fLine);
@@ -477,9 +701,21 @@ class EscPosReceiptService
             }
         }
         $lines[] = $this->centerText('Simpan struk ini sebagai bukti.', $width);
-        $lines[] = $this->centerText('POS System Powered by Qurais Kitchen', $width);
+        $lines[] = $this->centerText('Powered by Qurais Kitchen POS', $width);
 
         return implode("\n", $lines);
+    }
+
+    /**
+     * Wrap long text cleanly at word boundaries to fit column width
+     */
+    public function wrapLine(string $text, int $width = 32): string
+    {
+        $text = trim($text);
+        if ($text === '') {
+            return '';
+        }
+        return wordwrap($text, $width, "\n", true);
     }
 
     /**
@@ -487,6 +723,13 @@ class EscPosReceiptService
      */
     public function formatTwoColumns(string $left, string $right, int $width = 32): string
     {
+        $left = trim($left, "\r\n");
+        $right = trim($right, "\r\n");
+
+        if ($right === '') {
+            return $this->wrapLine($left, $width);
+        }
+
         $leftLen = strlen($left);
         $rightLen = strlen($right);
 
@@ -527,8 +770,7 @@ class EscPosReceiptService
                 $centeredLines[] = $line;
             } else {
                 $leftPad = (int) floor(($width - $len) / 2);
-                $rightPad = $width - $len - $leftPad;
-                $centeredLines[] = str_repeat(' ', $leftPad) . $line . str_repeat(' ', $rightPad);
+                $centeredLines[] = str_repeat(' ', $leftPad) . $line;
             }
         }
 
@@ -565,9 +807,9 @@ class EscPosReceiptService
 
         // Hanya list menu beserta catatan khusus masing-masing pada menu
         foreach ($order->items as $item) {
-            $lines[] = "{$item->quantity}x {$item->product_name}";
+            $lines[] = $this->wrapLine("{$item->quantity}x {$item->product_name}", $width);
             if (!empty($item->notes)) {
-                $lines[] = '  * CATATAN: ' . strtoupper($item->notes);
+                $lines[] = $this->wrapLine('  * CATATAN: ' . strtoupper($item->notes), $width);
             }
             $lines[] = '';
         }
@@ -588,57 +830,54 @@ class EscPosReceiptService
 
         $out = '';
         $out .= self::CMD_INIT;
+        $out .= self::CMD_ALIGN_LEFT;
 
         // Big Header
-        $out .= self::CMD_ALIGN_CENTER;
         $out .= self::CMD_BOLD_ON;
-        $out .= self::CMD_TEXT_DOUBLE;
-        $out .= '** TIKET MENU **' . self::LF;
+        $out .= self::CMD_TEXT_BIG_H;
+        $out .= $this->centerText('** TIKET MENU **', $width) . self::LF;
         $out .= self::CMD_TEXT_NORMAL;
         $out .= self::CMD_BOLD_OFF;
 
         $out .= str_repeat('=', $width) . self::LF;
 
         // Table / Target
-        $out .= self::CMD_ALIGN_CENTER;
         $out .= self::CMD_BOLD_ON;
         $out .= self::CMD_TEXT_BIG_H;
         $target = $order?->table_number ? 'MEJA: ' . $order->table_number : 'ORDER: ' . strtoupper(str_replace('_', ' ', (string)($order?->order_type ?? 'dine_in')));
-        $out .= $target . self::LF;
+        $out .= $this->centerText($target, $width) . self::LF;
         $out .= self::CMD_TEXT_NORMAL;
         $out .= self::CMD_BOLD_OFF;
 
-        $out .= self::CMD_ALIGN_LEFT;
         $orderNumber = $order?->order_number ?? 'TRX';
-        $timeStr = $order?->created_at ? date('H:i:s d/m/Y', strtotime((string)$order->created_at)) : date('H:i:s d/m/Y');
+        $timeStr = $order?->created_at ? date('H:i d/m/Y', strtotime((string)$order->created_at)) : date('H:i d/m/Y');
         $out .= $this->formatTwoColumns('No: ' . $orderNumber, $timeStr, $width) . self::LF;
         if (!empty($order?->customer_name)) {
-            $out .= 'Nama: ' . $order->customer_name . self::LF;
+            $out .= $this->wrapLine('Nama: ' . $order->customer_name, $width) . self::LF;
         }
         $out .= str_repeat('=', $width) . self::LF;
 
         // Menu item in Big Bold Text
-        $out .= self::CMD_ALIGN_CENTER;
         $out .= self::CMD_BOLD_ON;
-        $out .= self::CMD_TEXT_DOUBLE;
-        $out .= $item->quantity . 'x ' . $item->product_name . self::LF;
+        $out .= self::CMD_TEXT_BIG_H;
+        $out .= $this->centerText($item->quantity . 'x ' . $item->product_name, $width) . self::LF;
         $out .= self::CMD_TEXT_NORMAL;
         $out .= self::CMD_BOLD_OFF;
 
         if (!empty($item->notes)) {
-            $out .= self::CMD_ALIGN_LEFT;
             $out .= str_repeat('-', $width) . self::LF;
             $out .= self::CMD_BOLD_ON;
-            $out .= 'CATATAN: ' . strtoupper($item->notes) . self::LF;
+            $out .= $this->wrapLine('CATATAN: ' . strtoupper($item->notes), $width) . self::LF;
             $out .= self::CMD_BOLD_OFF;
         }
 
         $out .= str_repeat('=', $width) . self::LF;
-        $out .= self::CMD_ALIGN_CENTER;
         $out .= self::CMD_BOLD_ON;
         $statusStr = $item->is_prepared ? 'STATUS: SIAP SAJI' : 'STATUS: PERSIAPAN MASAK';
-        $out .= $statusStr . self::LF;
+        $out .= $this->centerText($statusStr, $width) . self::LF;
         $out .= self::CMD_BOLD_OFF;
+
+        $out .= str_repeat(self::LF, 4);
 
         if ($settings->cut_paper && strtolower($settings->paper_size) === '80mm') {
             $out .= self::CMD_CUT_PAPER;

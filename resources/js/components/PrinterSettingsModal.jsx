@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
-import { printReceiptWindow } from '../utils/thermalPrinter';
+import { printReceiptWindow, printDirectWebSerial } from '../utils/thermalPrinter';
 
 export default function PrinterSettingsModal({ isOpen, onClose, initialSettings, onSettingsUpdated }) {
     const [settings, setSettings] = useState(initialSettings || {
@@ -70,11 +70,17 @@ export default function PrinterSettingsModal({ isOpen, onClose, initialSettings,
     };
 
     const handleTestPrint = async () => {
-        setStatusMsg('Mengirim perintah cetak langsung ke ' + (settings.windows_printer_name || 'Putian POS Thermal 2') + '...');
+        setStatusMsg('Mengirim perintah cetak langsung ke ' + (settings.windows_printer_name || 'Putian POS Thermal') + '...');
         try {
             const res = await axios.post('/api/printer/test', { force_direct: true });
             if (res.data.success) {
-                setStatusMsg(res.data.message || 'Pola test print berhasil dikirim ke printer!');
+                if (res.data.direct_result && !res.data.direct_result.success && res.data.escpos_base64 && ('usb' in navigator || 'serial' in navigator)) {
+                    setStatusMsg('Menghubungkan langsung via Kabel USB (WebUSB / Serial)...');
+                    const usbRes = await printDirectWebSerial(res.data.escpos_base64);
+                    setStatusMsg(usbRes.message || 'Pola test print berhasil dikirim via Kabel USB!');
+                } else {
+                    setStatusMsg(res.data.message || 'Pola test print berhasil dikirim ke printer!');
+                }
                 setTimeout(() => setStatusMsg(''), 4000);
             }
         } catch (err) {
@@ -92,7 +98,7 @@ export default function PrinterSettingsModal({ isOpen, onClose, initialSettings,
                         </div>
                         <div>
                             <h3 className="text-sm font-bold text-white">Konfigurasi Mesin Printer Thermal</h3>
-                            <p className="text-[11px] text-slate-400">Putian POS & Integrasi ESC/POS Otomatis</p>
+                            <p className="text-[11px] text-slate-400">Multi-OS USB Spooler (Windows, macOS, Linux) & WebUSB</p>
                         </div>
                     </div>
                     <button type="button" onClick={onClose} className="p-2 text-slate-400 hover:text-white">
@@ -113,9 +119,9 @@ export default function PrinterSettingsModal({ isOpen, onClose, initialSettings,
                         <div className="flex items-center justify-between">
                             <label className="text-xs font-bold text-amber-300 flex items-center gap-1.5">
                                 <span className="w-2 h-2 rounded-full bg-amber-400"></span>
-                                Target Printer Fisik Windows
+                                Target Printer Fisik USB (Windows / macOS / Linux)
                             </label>
-                            <span className="text-[10px] text-slate-400 font-mono">USB / Spooler</span>
+                            <span className="text-[10px] text-slate-400 font-mono">USB / CUPS / Spooler</span>
                         </div>
 
                         <select

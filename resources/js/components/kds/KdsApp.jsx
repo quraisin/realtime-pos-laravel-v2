@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import { playKitchenAlertChime } from '../../utils/audio';
+import { printDirectWebSerial } from '../../utils/thermalPrinter';
 import ThermalReceiptModal from '../ThermalReceiptModal';
 
 export default function KdsApp({ user, initialSettings }) {
@@ -269,6 +270,9 @@ export default function KdsApp({ user, initialSettings }) {
             const res = await axios.post(`/api/printer/print-order/${order.id}`, { type: 'kitchen' });
             if (res.data.success) {
                 showToast(`Tiket Dapur #${order.order_number} berhasil dicetak!`);
+            } else if (res.data.escpos_base64 && ('usb' in navigator || 'serial' in navigator)) {
+                await printDirectWebSerial(res.data.escpos_base64);
+                showToast(`Tiket Dapur #${order.order_number} berhasil dicetak via USB!`);
             } else {
                 handlePrintKitchenTicket(order);
             }
@@ -306,6 +310,9 @@ export default function KdsApp({ user, initialSettings }) {
             const res = await axios.post(`/api/printer/print-item/${item.id}`);
             if (res.data.success) {
                 showToast(`Tiket Menu "${item.product_name}" tercetak ke printer!`);
+            } else if (res.data.escpos_base64 && ('usb' in navigator || 'serial' in navigator)) {
+                await printDirectWebSerial(res.data.escpos_base64);
+                showToast(`Tiket Menu "${item.product_name}" tercetak via USB!`);
             } else {
                 handlePrintItemTicket(item, order);
             }

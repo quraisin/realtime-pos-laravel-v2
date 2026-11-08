@@ -4,7 +4,7 @@ import confetti from 'canvas-confetti';
 import ThermalReceiptModal from '../ThermalReceiptModal';
 import PrinterSettingsModal from '../PrinterSettingsModal';
 import { playCashierSuccessDing } from '../../utils/audio';
-import { printReceiptWindow } from '../../utils/thermalPrinter';
+import { printReceiptWindow, printDirectWebUsb } from '../../utils/thermalPrinter';
 
 export default function PosApp({ user, initialSettings }) {
     const [categories, setCategories] = useState([]);
@@ -278,10 +278,31 @@ export default function PosApp({ user, initialSettings }) {
                 // Auto-print fallback: if auto_print is on, and direct hardware print is disabled or failed
                 const receipt = res.data.receipt;
                 const directPrinted = receipt?.direct_print_result?.success;
-                if (receipt?.auto_print && !directPrinted && !receipt?.direct_hardware_print) {
-                    setTimeout(() => {
-                        printReceiptWindow(receipt.plain_text, receipt.paper_size);
-                    }, 400);
+                if (receipt?.auto_print && !directPrinted) {
+                    if (receipt?.escpos_base64 && 'usb' in navigator) {
+                        printDirectWebUsb(receipt.escpos_base64, false)
+                            .then(usbRes => {
+                                setLastReceiptData(prev => prev ? {
+                                    ...prev,
+                                    direct_print_result: {
+                                        success: true,
+                                        printer: usbRes.printer,
+                                        message: usbRes.message,
+                                    }
+                                } : prev);
+                            })
+                            .catch(() => {
+                                if (!receipt?.direct_hardware_print) {
+                                    setTimeout(() => {
+                                        printReceiptWindow(receipt.plain_text, receipt.paper_size);
+                                    }, 400);
+                                }
+                            });
+                    } else if (!receipt?.direct_hardware_print) {
+                        setTimeout(() => {
+                            printReceiptWindow(receipt.plain_text, receipt.paper_size);
+                        }, 400);
+                    }
                 }
 
                 // Reset Cart & Close Checkout
